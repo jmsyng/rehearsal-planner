@@ -1,0 +1,12 @@
+.env
+.env.local
+.env.*.local
+__pycache__/
+*.pyc
+*.pyo
+.DS_Store
+venv/
+.venv/
+.claude/
+.vercel/
+node_modules/
