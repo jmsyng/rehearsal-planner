@@ -1943,9 +1943,6 @@ function makeSongCard(song, inSetList) {
     saveBtn.textContent = 'Save';
     saveBtn.addEventListener('click', e => {
       e.stopPropagation();
-      song.extra.RecordedTuning = recordedInput.value;
-      song.extra.OurTuning = ourInput.value;
-      song.extra.YouTubeLink = youtubeInput.value;
       apiUpdateSong(song);
       showToast('Changes saved');
       expandedSongId = null;
