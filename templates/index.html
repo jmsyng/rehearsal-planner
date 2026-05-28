@@ -1736,7 +1736,7 @@ function makeSongCard(song, inSetList) {
   nameText.textContent = song.name;
   nameEl.appendChild(nameText);
 
-  const tuning = song.extra?.Tuning;
+  const tuning = song.extra?.OurTuning || song.extra?.Tuning;
   if (tuning) {
     const tuningBadge = document.createElement('span');
     tuningBadge.className = 'tuning-badge';
