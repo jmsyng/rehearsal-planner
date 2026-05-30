@@ -5,6 +5,7 @@ import json
 import os
 import urllib.request
 import urllib.parse
+import urllib.error
 import base64
 import time
 from flask import Flask, jsonify, render_template, request, g
@@ -46,11 +47,114 @@ def index():
     )
 
 
+# ── Local dev auth proxy ─────────────────────────────────────────────────────────
+# Neon Auth sets its session cookie as SameSite=None; Secure, owned by the
+# *.neon.tech origin. Relative to http://localhost that's a cross-site cookie, which
+# modern browsers block — so the browser-side `/token` JWT exchange fails and local
+# sign-in never completes. These routes do the cookie round-trip *server-side* (Python
+# isn't subject to browser cross-site cookie rules), returning the JWT to the page.
+# Localhost-only: refuse on Vercel or any non-loopback caller so it can't be used in prod.
+
+def _is_local_dev():
+    if os.environ.get("VERCEL"):
+        return False
+    return (request.remote_addr or "") in ("127.0.0.1", "::1", "localhost")
+
+
+def _neon_session_cookie(set_cookie_headers):
+    """Collapse Set-Cookie response headers into a single Cookie request header value."""
+    return "; ".join(h.split(";", 1)[0] for h in (set_cookie_headers or []) if h)
+
+
+@app.route("/api/dev/login", methods=["POST"])
+def dev_login():
+    if not _is_local_dev():
+        return jsonify({"error": "not found"}), 404
+    base = os.environ.get("NEON_AUTH_BASE_URL", "").rstrip("/")
+    if not base:
+        return jsonify({"error": "auth not configured"}), 500
+
+    body = request.get_json(force=True) or {}
+    email = (body.get("email") or "").strip()
+    password = body.get("password") or ""
+    mode = body.get("mode") or "signin"
+    if not email or not password:
+        return jsonify({"error": "Email and password are required"}), 400
+
+    endpoint = "/sign-up/email" if mode == "signup" else "/sign-in/email"
+    payload = {"email": email, "password": password}
+    if mode == "signup":
+        payload["name"] = body.get("name") or email.split("@")[0]
+
+    # Better Auth validates the Origin against its trusted-origins list and rejects
+    # requests without one. The browser sets this automatically; for our server-side
+    # call we forward the app's own origin (the same one the browser would send).
+    origin = request.host_url.rstrip("/")
+
+    # 1) Sign in / up — capture the session cookie from the response headers.
+    try:
+        req = urllib.request.Request(f"{base}{endpoint}", method="POST")
+        req.add_header("Content-Type", "application/json")
+        req.add_header("Origin", origin)
+        with urllib.request.urlopen(req, json.dumps(payload).encode(), timeout=10) as resp:
+            cookie_header = _neon_session_cookie(resp.headers.get_all("Set-Cookie"))
+            signin_data = json.loads(resp.read().decode())
+    except urllib.error.HTTPError as e:
+        try:
+            err = json.loads(e.read().decode())
+            msg = err.get("message") or err.get("error") or err.get("code") or "Authentication failed"
+        except Exception:
+            msg = "Authentication failed"
+        return jsonify({"error": msg}), (e.code if e.code in (400, 401, 409) else 401)
+    except Exception:
+        return jsonify({"error": "Could not reach auth server"}), 502
+
+    if not cookie_header:
+        return jsonify({"error": "Auth server returned no session cookie"}), 502
+
+    # 2) Exchange the session cookie for a JWT, server-side.
+    jwt = _exchange_session_for_jwt(base, cookie_header, origin)
+    if not jwt:
+        return jsonify({"error": "JWT exchange failed"}), 502
+
+    email_out = (signin_data.get("user") or {}).get("email") or email
+    return jsonify({"token": jwt, "email": email_out, "devSession": cookie_header})
+
+
+@app.route("/api/dev/token", methods=["POST"])
+def dev_token():
+    """Refresh the 15-min JWT locally by replaying the stored dev session cookie."""
+    if not _is_local_dev():
+        return jsonify({"error": "not found"}), 404
+    base = os.environ.get("NEON_AUTH_BASE_URL", "").rstrip("/")
+    cookie_header = (request.get_json(force=True) or {}).get("devSession") or ""
+    if not base or not cookie_header:
+        return jsonify({"error": "missing session"}), 400
+    jwt = _exchange_session_for_jwt(base, cookie_header, request.host_url.rstrip("/"))
+    if not jwt:
+        return jsonify({"error": "JWT exchange failed"}), 401
+    return jsonify({"token": jwt})
+
+
+def _exchange_session_for_jwt(base, cookie_header, origin):
+    try:
+        treq = urllib.request.Request(f"{base}/token", method="GET")
+        treq.add_header("Cookie", cookie_header)
+        treq.add_header("Origin", origin)
+        with urllib.request.urlopen(treq, timeout=10) as tresp:
+            return json.loads(tresp.read().decode()).get("token")
+    except Exception:
+        return None
+
+
 # ── Songs API ──────────────────────────────────────────────────────────────────
 
 @app.route("/api/songs", methods=["GET"])
 @require_auth
 def api_get_songs():
+    band = db.get_user_band(g.user_id)
+    if band:
+        return jsonify(db.get_band_songs(band["id"], g.user_id))
     return jsonify(db.get_songs(g.user_id))
 
 
@@ -60,7 +164,15 @@ def api_add_song():
     song = request.get_json(force=True)
     if not song or not song.get("id") or not song.get("name"):
         return jsonify({"error": "id and name are required"}), 400
-    saved = db.upsert_song(g.user_id, song)
+    band = db.get_user_band(g.user_id)
+    band_id = band["id"] if band else None
+    saved = db.upsert_song(g.user_id, song, band_id=band_id)
+    if band_id:
+        db.create_proposal(band_id, song["id"], g.user_id)
+        # Return the enriched band song so the frontend gets proposal metadata immediately
+        for s in db.get_band_songs(band_id, g.user_id):
+            if s["id"] == song["id"]:
+                return jsonify(s), 201
     return jsonify(saved), 201
 
 
@@ -76,7 +188,11 @@ def api_update_song(song_id):
 @app.route("/api/songs/<song_id>", methods=["DELETE"])
 @require_auth
 def api_delete_song(song_id):
-    deleted = db.delete_song(g.user_id, song_id)
+    band = db.get_user_band(g.user_id)
+    if band:
+        deleted = db.delete_band_song(band["id"], song_id)
+    else:
+        deleted = db.delete_song(g.user_id, song_id)
     if not deleted:
         return jsonify({"error": "Song not found"}), 404
     return jsonify({"ok": True})
@@ -87,6 +203,9 @@ def api_delete_song(song_id):
 @app.route("/api/setlist", methods=["GET"])
 @require_auth
 def api_get_setlist():
+    band = db.get_user_band(g.user_id)
+    if band:
+        return jsonify(db.get_band_setlist(band["id"]))
     return jsonify(db.get_setlist(g.user_id))
 
 
@@ -97,7 +216,11 @@ def api_save_setlist():
     entries = request.get_json(force=True)
     if not isinstance(entries, list):
         return jsonify({"error": "Expected array"}), 400
-    db.save_setlist(g.user_id, entries)
+    band = db.get_user_band(g.user_id)
+    if band:
+        db.save_band_setlist(band["id"], entries)
+    else:
+        db.save_setlist(g.user_id, entries)
     return jsonify({"ok": True})
 
 
@@ -184,6 +307,197 @@ def get_initial_songs():
         result.append(song)
 
     return jsonify(result)
+
+
+# ── Band API ───────────────────────────────────────────────────────────────────
+
+@app.route("/api/band", methods=["POST"])
+@require_auth
+def api_create_band():
+    data = request.get_json(force=True) or {}
+    name = data.get("name", "").strip()
+    if not name:
+        return jsonify({"error": "Band name is required"}), 400
+    if db.get_user_band(g.user_id):
+        return jsonify({"error": "You are already in a band"}), 409
+    band = db.create_band(g.user_id, name)
+    db.migrate_songs_to_band(g.user_id, band["id"])
+    return jsonify(band), 201
+
+
+@app.route("/api/band", methods=["GET"])
+@require_auth
+def api_get_band():
+    band = db.get_user_band(g.user_id)
+    return jsonify(band)
+
+
+@app.route("/api/band/join", methods=["POST"])
+@require_auth
+def api_join_band():
+    data = request.get_json(force=True) or {}
+    token = data.get("invite_token", "").strip()
+    if not token:
+        return jsonify({"error": "invite_token is required"}), 400
+    try:
+        band = db.join_band(g.user_id, token)
+        if not band.get("already_member"):
+            db.migrate_songs_to_band(g.user_id, band["id"])
+        return jsonify(band)
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+
+
+@app.route("/api/band/proposals", methods=["GET"])
+@require_auth
+def api_get_proposals():
+    band = db.get_user_band(g.user_id)
+    if not band:
+        return jsonify([])
+    return jsonify(db.get_pending_proposals(band["id"], g.user_id))
+
+
+@app.route("/api/band/vote", methods=["POST"])
+@require_auth
+def api_cast_vote():
+    data = request.get_json(force=True) or {}
+    proposal_id = data.get("proposal_id", "").strip()
+    vote        = data.get("vote", "").strip()
+    reason      = (data.get("reason") or "").strip() or None
+    if not proposal_id or not vote:
+        return jsonify({"error": "proposal_id and vote are required"}), 400
+    try:
+        result = db.cast_vote(proposal_id, g.user_id, vote, reason=reason)
+        return jsonify(result)
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+
+
+@app.route("/api/notifications", methods=["GET"])
+@require_auth
+def api_get_notifications():
+    return jsonify(db.get_notifications(g.user_id))
+
+
+@app.route("/api/notifications/read", methods=["POST"])
+@require_auth
+def api_mark_notifications_read():
+    data = request.get_json(force=True) or {}
+    proposal_ids = data.get("proposal_ids", [])
+    db.mark_notifications_read(g.user_id, proposal_ids)
+    return jsonify({"ok": True})
+
+
+# ── User Profile & Preferences API ───────────────────────────────────────────────
+
+@app.route("/api/profile", methods=["GET"])
+@require_auth
+def api_get_profile():
+    return jsonify(db.get_profile(g.user_id))
+
+
+@app.route("/api/profile", methods=["PUT"])
+@require_auth
+def api_update_profile():
+    data = request.get_json(force=True) or {}
+    db.upsert_profile(g.user_id, data.get("display_name"), data.get("roles", []))
+    return jsonify(db.get_profile(g.user_id))
+
+
+@app.route("/api/profile/notifications", methods=["PUT"])
+@require_auth
+def api_update_notif_prefs():
+    data = request.get_json(force=True) or {}
+    db.update_notif_prefs(g.user_id, data)
+    return jsonify(db.get_profile(g.user_id)["notif_prefs"])
+
+
+# ── Band Management API ──────────────────────────────────────────────────────────
+
+@app.route("/api/band", methods=["PATCH"])
+@require_auth
+def api_update_band():
+    """Any member may rename the band or adjust the voting threshold."""
+    band = db.get_user_band(g.user_id)
+    if not band:
+        return jsonify({"error": "You are not in a band"}), 404
+    data = request.get_json(force=True) or {}
+    if "name" in data:
+        name = (data.get("name") or "").strip()
+        if not name:
+            return jsonify({"error": "Band name is required"}), 400
+        db.rename_band(band["id"], name)
+    if "approval_factor" in data:
+        try:
+            db.set_approval_factor(band["id"], float(data["approval_factor"]))
+        except (TypeError, ValueError):
+            return jsonify({"error": "approval_factor must be a number"}), 400
+    return jsonify(db.get_user_band(g.user_id))
+
+
+@app.route("/api/band/invite/regenerate", methods=["POST"])
+@require_auth
+def api_regenerate_invite():
+    band = db.get_user_band(g.user_id)
+    if not band:
+        return jsonify({"error": "You are not in a band"}), 404
+    token = db.regenerate_invite(band["id"])
+    return jsonify({"invite_token": token})
+
+
+@app.route("/api/band/leave", methods=["POST"])
+@require_auth
+def api_leave_band():
+    band = db.get_user_band(g.user_id)
+    if not band:
+        return jsonify({"error": "You are not in a band"}), 404
+    try:
+        db.leave_band(g.user_id, band["id"])
+        return jsonify({"ok": True})
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 409
+
+
+@app.route("/api/band/members/<user_id>", methods=["PATCH"])
+@require_auth
+def api_promote_member(user_id):
+    """Admin-only: promote a member to admin."""
+    band = db.get_user_band(g.user_id)
+    if not band:
+        return jsonify({"error": "You are not in a band"}), 404
+    if band.get("role") != "admin":
+        return jsonify({"error": "Only an admin can change roles"}), 403
+    db.promote_member(band["id"], user_id)
+    return jsonify(db.get_user_band(g.user_id))
+
+
+@app.route("/api/band/members/<user_id>", methods=["DELETE"])
+@require_auth
+def api_remove_member(user_id):
+    """Admin-only: remove a member from the band."""
+    band = db.get_user_band(g.user_id)
+    if not band:
+        return jsonify({"error": "You are not in a band"}), 404
+    if band.get("role") != "admin":
+        return jsonify({"error": "Only an admin can remove members"}), 403
+    try:
+        db.remove_member(band["id"], user_id)
+        return jsonify(db.get_user_band(g.user_id))
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 409
+
+
+@app.route("/api/band", methods=["DELETE"])
+@require_auth
+def api_delete_band():
+    """Admin-only: delete the entire band."""
+    band = db.get_user_band(g.user_id)
+    if not band:
+        return jsonify({"error": "You are not in a band"}), 404
+    if band.get("role") != "admin":
+        return jsonify({"error": "Only an admin can delete the band"}), 403
+    db.delete_band(band["id"])
+    return jsonify({"ok": True})
 
 
 # ── Spotify / YouTube / Album Art (stateless proxy routes) ────────────────────
@@ -323,4 +637,9 @@ def get_album_art(artist, track):
 
 if __name__ == "__main__":
     print("Rehearsal Planner running at http://localhost:5050")
-    app.run(debug=True, port=5050)
+    # When supervised by launchd (RP_SERVICE=1) run a single process so the
+    # supervisor cleanly owns/restarts it; the Werkzeug auto-reloader's extra
+    # child process confuses external supervisors. Plain `python3 app.py` keeps
+    # the reloader on for normal local dev. Templates still hot-reload either way.
+    _service = os.environ.get("RP_SERVICE") == "1"
+    app.run(debug=True, port=5050, use_reloader=not _service)
