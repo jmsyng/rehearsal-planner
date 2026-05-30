@@ -756,6 +756,12 @@
     .song-card:hover { border-color: var(--accent-dim); box-shadow: 0 0 0 1px var(--accent-dim); }
     .song-card.sortable-ghost { opacity: 0.4; }
     .song-card.sortable-drag { box-shadow: 0 8px 24px rgba(0,0,0,.5); transform: scale(1.02); border-color: var(--accent); }
+    /* While dragging, the element's `transform` is updated continuously to follow the
+       pointer (esp. the touch fallback clone). The base .song-card `transition: transform`
+       would animate each update, making the card lag behind the finger ("molasses" on
+       mobile). Drop the transition on the dragged element so it tracks 1:1. */
+    .song-card.sortable-drag,
+    .song-card.sortable-fallback { transition: none; }
 
     .drag-handle {
       color: var(--text-dim);
