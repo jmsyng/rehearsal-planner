@@ -28,6 +28,13 @@
       --setlist-accent: #f5a142;
       --setlist-accent-dim: #8a5b1f;
       --setlist-tint: rgba(245, 161, 66, 0.06);
+      /* Avatar palette — deterministic per-user pick (customizable in future) */
+      --avatar-0: #7c6af7;
+      --avatar-1: #3ecf8e;
+      --avatar-2: #f5a142;
+      --avatar-3: #e0598b;
+      --avatar-4: #5fb8d9;
+      --avatar-5: #b07cf7;
     }
 
     body {
@@ -41,20 +48,212 @@
     header {
       background: var(--surface);
       border-bottom: 1px solid var(--border);
-      padding: 12px 24px;
+      padding: 10px 20px;
       display: flex;
-      align-items: center;
-      gap: 12px;
-      flex-wrap: wrap;
-      justify-content: space-between;
+      flex-direction: column;
+      gap: 10px;
+      position: sticky;
+      top: 0;
+      z-index: 900;
     }
 
-    header h1 {
-      font-size: 18px;
+    .hdr-top {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+    .hdr-left, .hdr-right {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      min-width: 0;
+    }
+
+    .hdr-logo {
+      font-size: 17px;
       font-weight: 700;
-      letter-spacing: .5px;
+      letter-spacing: .3px;
       color: var(--accent);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .hdr-logo-mark { margin-right: 4px; }
+
+    /* Square ghost icon button — shared by ☰ hamburger and 🔔 bell */
+    .hdr-icon-btn {
+      position: relative;
+      background: transparent;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      color: var(--text-dim);
+      width: 36px;
+      height: 36px;
+      padding: 0;
+      font-size: 16px;
+      line-height: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
       flex-shrink: 0;
+      transition: border-color .15s, color .15s, background .15s;
+    }
+    .hdr-icon-btn:hover { border-color: var(--accent); color: var(--text); background: transparent; }
+
+    .hdr-add-btn {
+      background: var(--accent);
+      color: #fff;
+      border: none;
+      border-radius: 8px;
+      height: 36px;
+      padding: 0 16px;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      white-space: nowrap;
+      flex-shrink: 0;
+      display: flex;
+      align-items: center;
+      gap: 2px;
+    }
+    .hdr-add-btn:hover { background: #6b5ce7; }
+    .hdr-add-icon { font-size: 17px; line-height: 1; }
+
+    /* User avatar — first initial in a solid colored circle (color set in JS) */
+    .hdr-user-wrap { position: relative; flex-shrink: 0; }
+    .hdr-avatar {
+      width: 36px;
+      height: 36px;
+      border-radius: 50%;
+      border: none;
+      color: #fff;
+      background: var(--avatar-0);
+      font-size: 15px;
+      font-weight: 700;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      text-transform: uppercase;
+      flex-shrink: 0;
+    }
+
+    #notif-badge {
+      position: absolute;
+      top: -5px;
+      right: -5px;
+      background: var(--red);
+      color: #fff;
+      border: 2px solid var(--surface);
+      border-radius: 9px;
+      font-size: 10px;
+      font-weight: 700;
+      padding: 0 4px;
+      min-width: 17px;
+      height: 17px;
+      line-height: 13px;
+      text-align: center;
+    }
+
+    /* Header dropdown menus (band, user) — reuse .app-menu-item for rows */
+    .hdr-menu {
+      position: absolute;
+      top: calc(100% + 8px);
+      min-width: 210px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      box-shadow: 0 8px 24px rgba(0,0,0,.5);
+      z-index: 1600;
+      overflow: hidden;
+    }
+    #band-menu { left: 0; }
+    #user-menu { right: 0; }
+    .hdr-menu-label {
+      padding: 10px 14px;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: .6px;
+      text-transform: uppercase;
+      color: var(--text-dim);
+    }
+    .hdr-menu-identity {
+      padding: 10px 14px;
+    }
+    .hdr-menu-identity .id-name {
+      font-size: 13px;
+      font-weight: 600;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .hdr-menu-identity .id-email {
+      font-size: 11px;
+      color: var(--text-dim);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .hdr-menu-sep { height: 1px; background: var(--border); }
+
+    /* Full-width search bar (Reddit-style) */
+    .hdr-search {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      padding: 0 14px;
+      height: 38px;
+      transition: border-color .15s;
+    }
+    .hdr-search:focus-within { border-color: var(--accent); }
+    .hdr-search-icon { color: var(--text-dim); font-size: 13px; flex-shrink: 0; }
+    #global-search {
+      flex: 1;
+      min-width: 0;
+      background: transparent;
+      border: none;
+      outline: none;
+      color: var(--text);
+      font-size: 13px;
+    }
+    #global-search::placeholder { color: var(--text-dim); }
+    #global-search-clear {
+      background: none;
+      border: none;
+      color: var(--text-dim);
+      cursor: pointer;
+      font-size: 16px;
+      line-height: 1;
+      padding: 4px;
+      display: none;
+      flex-shrink: 0;
+    }
+    #global-search-clear:hover { color: var(--text); }
+
+    /* Spotify fallback button shown in the library empty state */
+    .spotify-fallback-btn {
+      margin-top: 12px;
+      background: var(--green);
+      color: #06281a;
+      border: none;
+      border-radius: 8px;
+      padding: 8px 16px;
+      font-size: 12px;
+      font-weight: 700;
+      cursor: pointer;
+    }
+    .spotify-fallback-btn:hover { filter: brightness(1.08); }
+
+    @media (max-width: 800px) {
+      header { padding: 10px 14px; }
+      .hdr-logo { font-size: 15px; }
+      .hdr-add-label { display: none; }
+      .hdr-add-btn { padding: 0; width: 36px; justify-content: center; }
     }
 
     .search-container {
@@ -265,31 +464,111 @@
       background: var(--surface);
       border: 1px solid var(--border);
       border-radius: var(--radius);
-      padding: 14px;
+      padding: 14px 16px;
       margin-bottom: 8px;
       display: flex;
-      align-items: center;
-      gap: 10px;
+      flex-direction: column;
+      gap: 0;
       cursor: grab;
       transition: border-color .15s, box-shadow .15s, transform .1s;
       user-select: none;
     }
 
     .song-card.expanded {
-      flex-direction: column;
       align-items: flex-start;
-      padding: 14px;
     }
 
     .song-card-row {
       display: flex;
-      align-items: center;
-      gap: 10px;
+      align-items: flex-start;
+      gap: 12px;
       width: 100%;
     }
 
-    .song-card.expanded .song-card-row {
-      margin-bottom: 14px;
+    .song-card-actions {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      width: 100%;
+      padding-top: 10px;
+      margin-top: 8px;
+      border-top: 1px solid var(--border);
+    }
+
+    .song-meta {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      flex-wrap: wrap;
+      margin-top: 3px;
+    }
+
+    .status-badge {
+      font-size: 10px;
+      font-weight: 700;
+      padding: 2px 7px;
+      border-radius: 10px;
+      white-space: nowrap;
+      text-transform: uppercase;
+      letter-spacing: 0.4px;
+    }
+    .status-badge.learning  { background: rgba(80,200,120,0.18); color: #50c878; }
+    .status-badge.proposed  { background: rgba(245,161,66,0.18);  color: var(--setlist-accent); }
+    .status-badge.resting   { background: rgba(180,80,80,0.15);   color: #c87878; }
+    .status-badge.active    { background: rgba(124,106,247,0.18); color: var(--accent); }
+
+    .meta-added-by {
+      font-size: 11px;
+      color: var(--text-dim);
+      white-space: nowrap;
+    }
+
+    .vote-control {
+      display: flex;
+      align-items: center;
+      gap: 3px;
+    }
+    .vote-btn {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      color: var(--text-dim);
+      font-size: 11px;
+      font-weight: 600;
+      padding: 2px 8px;
+      border-radius: 10px;
+      cursor: pointer;
+      transition: border-color .15s, background .15s, color .15s;
+      white-space: nowrap;
+    }
+    .vote-btn:hover { border-color: var(--accent-dim); color: var(--text); }
+    .vote-btn.lk-5.active { background: rgba(62,207,142,.2);  border-color: #3ecf8e; color: #3ecf8e; }
+    .vote-btn.lk-4.active { background: rgba(62,207,172,.2);  border-color: #3ecfac; color: #3ecfac; }
+    .vote-btn.lk-3.active { background: rgba(140,140,160,.2); border-color: #8c8ca0; color: #8c8ca0; }
+    #library-panel .vote-btn.lk-3.active { background: rgba(34,211,238,.15); border-color: var(--library-accent); color: var(--library-accent); }
+    #setlist-panel .vote-btn.lk-3.active { background: rgba(251,191,36,.15);  border-color: var(--setlist-accent);  color: var(--setlist-accent);  }
+    .vote-btn.lk-2.active { background: rgba(240,82,82,.2);   border-color: #f05252; color: #f05252; }
+    .vote-btn.lk-1.active { background: rgba(240,82,82,.2);   border-color: #f05252; color: #f05252; }
+    /* Unvoted proposal dot */
+    .song-card.needs-vote .song-card-row { position: relative; }
+    .song-card.needs-vote .song-card-row::after {
+      content: ''; position: absolute; top: -2px; left: -2px;
+      width: 8px; height: 8px; border-radius: 50%; background: var(--red);
+      animation: pulse-dot 2.4s ease-in-out infinite;
+    }
+    @keyframes pulse-dot {
+      0%, 55% { opacity: 1;   transform: scale(1); }
+      78%     { opacity: 0.5; transform: scale(1.35); }
+      100%    { opacity: 1;   transform: scale(1); }
+    }
+
+    .score-badge {
+      font-size: 11px;
+      font-weight: 600;
+      background: rgba(124,106,247,0.15);
+      color: var(--accent);
+      border-radius: 10px;
+      padding: 2px 7px;
+      white-space: nowrap;
     }
 
     .expanded-info {
@@ -455,9 +734,9 @@
     }
 
     .album-art {
-      width: 48px;
-      height: 48px;
-      border-radius: 6px;
+      width: 56px;
+      height: 56px;
+      border-radius: 8px;
       background: var(--bg);
       border: 1px solid var(--border);
       display: flex;
@@ -483,8 +762,8 @@
       font-size: 18px;
       cursor: grab;
       flex-shrink: 0;
-      padding: 8px 6px;
-      margin: -8px 0 -8px -8px;
+      padding: 4px 6px;
+      margin: 0;
       display: flex;
       align-items: center;
       justify-content: center;
@@ -502,11 +781,11 @@
       border: none;
       color: var(--text-dim);
       cursor: pointer;
-      padding: 8px 4px;
+      padding: 8px 8px;
       display: flex;
       align-items: center;
       justify-content: center;
-      font-size: 16px;
+      font-size: 18px;
       flex-shrink: 0;
       transition: color 0.2s, transform 0.2s ease;
       line-height: 1;
@@ -522,9 +801,13 @@
     }
 
     .song-info { flex: 1; min-width: 0; }
-    .song-artist { font-size: 11px; color: var(--text-dim); margin-bottom: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .song-name { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .song-dur { font-size: 12px; color: var(--text-dim); margin-top: 2px; }
+    .song-artist { font-size: 12px; color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .song-name {
+      font-size: 14px; font-weight: 600; margin-bottom: 2px;
+      display: flex; align-items: center; gap: 6px; min-width: 0;
+    }
+    .song-name > span:first-child { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+    .song-dur { font-size: 12px; color: var(--text-dim); display: flex; align-items: center; gap: 6px; }
 
     .plays-control {
       display: flex;
@@ -536,10 +819,10 @@
       background: var(--bg);
       border: 1px solid var(--border);
       border-radius: 4px;
-      width: 24px;
-      height: 24px;
+      width: 30px;
+      height: 30px;
       padding: 0;
-      font-size: 16px;
+      font-size: 18px;
       line-height: 1;
       color: var(--text-dim);
       display: flex;
@@ -548,30 +831,48 @@
     }
     .plays-control button:hover { border-color: var(--accent); color: var(--text); background: transparent; }
     .plays-count {
-      min-width: 20px;
+      min-width: 22px;
       text-align: center;
-      font-size: 13px;
+      font-size: 14px;
       font-weight: 600;
     }
 
     .add-btn {
-      margin-left: auto;
       padding: 5px 12px;
       font-size: 12px;
+      background: var(--setlist-accent-dim);
+      color: #fff;
+      border: 1px solid var(--setlist-accent);
     }
+    .add-btn:hover { background: var(--setlist-accent); color: #000; }
+    .add-btn:disabled { opacity: 0.45; cursor: default; }
 
     .remove-btn {
       background: transparent;
       border: none;
       color: var(--text-dim);
       font-size: 18px;
-      padding: 0 4px;
+      padding: 0;
+      min-width: 30px;
+      height: 30px;
       cursor: pointer;
       line-height: 1;
       border-radius: 4px;
       flex-shrink: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
     }
     .remove-btn:hover { color: var(--red); background: transparent; }
+
+    .set-remove-btn {
+      padding: 5px 12px;
+      font-size: 12px;
+      background: var(--library-accent-dim);
+      color: #fff;
+      border: 1px solid var(--library-accent);
+    }
+    .set-remove-btn:hover { background: var(--library-accent); color: #000; }
 
     /* Time bar */
     .time-bar-wrapper {
@@ -643,7 +944,6 @@
       border-radius: 10px;
       background: var(--border);
       color: var(--text-dim);
-      margin-left: 6px;
       white-space: nowrap;
     }
 
@@ -1124,23 +1424,6 @@
       }
     }
 
-    /* Active search input styling */
-    #library-search.active,
-    #setlist-search.active {
-      border-color: var(--accent);
-      box-shadow: 0 0 0 2px var(--accent-dim);
-    }
-
-    #library-search-clear,
-    #setlist-search-clear {
-      transition: color 0.2s;
-    }
-
-    #library-search-clear:hover,
-    #setlist-search-clear:hover {
-      color: var(--text);
-    }
-
     @media (max-width: 800px) {
       .panel {
         display: none;
@@ -1213,18 +1496,6 @@
       border-left-color: var(--setlist-accent);
     }
 
-    /* Search input focus adopts the panel theme */
-    #library-search:focus,
-    #library-search.active {
-      border-color: var(--library-accent) !important;
-      box-shadow: 0 0 0 2px rgba(95, 184, 217, 0.25) !important;
-    }
-    #setlist-search:focus,
-    #setlist-search.active {
-      border-color: var(--setlist-accent) !important;
-      box-shadow: 0 0 0 2px rgba(245, 161, 66, 0.25) !important;
-    }
-
     /* Mobile tab themed indicator stripe */
     @media (max-width: 800px) {
       .mobile-tab[data-panel="library-panel"].active {
@@ -1282,12 +1553,266 @@
 </div>
 <style>@keyframes spin { to { transform: rotate(360deg); } }</style>
 
+<!-- Band Setup — shown to authenticated users who aren't in a band yet -->
+<div id="band-setup-overlay" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,.88); z-index:1500; flex-direction:column; align-items:center; justify-content:center; padding:20px;">
+  <div style="background:var(--surface); border:1px solid var(--border); border-radius:var(--radius); padding:32px; max-width:420px; width:100%;">
+    <h2 style="font-size:20px; margin-bottom:6px;">Set up your band</h2>
+    <p style="color:var(--text-dim); font-size:13px; margin-bottom:24px;">Create a band to share a library and set list with your bandmates, or join one with an invite token.</p>
+
+    <label style="display:block; font-size:12px; font-weight:600; color:var(--text-dim); margin-bottom:6px;">Band Name</label>
+    <input id="band-name-input" type="text" placeholder="e.g., The Riffs" style="width:100%; background:var(--bg); border:1px solid var(--border); color:var(--text); padding:8px 12px; font-size:13px; border-radius:4px; outline:none; margin-bottom:10px;" />
+    <button id="create-band-btn" style="width:100%; background:var(--accent); color:#fff; border:none; border-radius:6px; padding:10px; font-size:14px; font-weight:600; cursor:pointer; margin-bottom:20px;">Create Band</button>
+
+    <div style="text-align:center; color:var(--text-dim); font-size:12px; margin-bottom:16px;">— or join with an invite token —</div>
+
+    <label style="display:block; font-size:12px; font-weight:600; color:var(--text-dim); margin-bottom:6px;">Invite Token</label>
+    <input id="join-token-input" type="text" placeholder="Paste the token from your invite link" style="width:100%; background:var(--bg); border:1px solid var(--border); color:var(--text); padding:8px 12px; font-size:13px; border-radius:4px; outline:none; margin-bottom:10px;" />
+    <button id="join-band-btn" style="width:100%; background:var(--library-accent-dim); color:#fff; border:none; border-radius:6px; padding:10px; font-size:14px; font-weight:600; cursor:pointer;">Join Band</button>
+
+    <p id="band-setup-error" style="display:none; color:var(--red); font-size:12px; margin-top:12px; text-align:center;"></p>
+  </div>
+</div>
+
+<!-- Voting Modal — for voting on song proposals -->
+<div id="voting-modal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,.85); z-index:1500; flex-direction:column; align-items:center; justify-content:center; padding:20px;">
+  <div style="background:var(--surface); border:1px solid var(--border); border-radius:var(--radius); padding:24px; max-width:460px; width:100%; max-height:90vh; overflow-y:auto;">
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+      <h2 style="margin:0; font-size:18px;">Vote on Songs</h2>
+      <button id="voting-modal-close" style="background:none; border:none; font-size:24px; cursor:pointer; color:var(--text-dim); padding:0; width:30px; height:30px; display:flex; align-items:center; justify-content:center; line-height:1;">×</button>
+    </div>
+    <p id="voting-progress" style="color:var(--text-dim); font-size:12px; margin-bottom:20px;"></p>
+    <div id="voting-song-card" style="background:var(--bg); border:1px solid var(--border); border-radius:8px; padding:16px; margin-bottom:16px;"></div>
+    <div id="voting-buttons" style="display:flex; gap:10px; justify-content:center;"></div>
+    <div id="voting-empty" style="display:none; text-align:center; padding:40px 20px;">
+      <div style="font-size:36px; margin-bottom:12px;">✌️</div>
+      <p style="font-weight:600; margin-bottom:4px;">All caught up!</p>
+      <p style="color:var(--text-dim); font-size:13px;">Nothing to vote on right now.</p>
+    </div>
+  </div>
+</div>
+
+<!-- Band Settings Modal -->
+<div id="band-info-modal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,.7); z-index:1500; flex-direction:column; align-items:center; justify-content:center; padding:20px;">
+  <div style="background:var(--surface); border:1px solid var(--border); border-radius:var(--radius); padding:24px; max-width:460px; width:100%; max-height:90vh; overflow-y:auto;">
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
+      <h2 style="margin:0; font-size:18px;">Band Settings</h2>
+      <button onclick="document.getElementById('band-info-modal').style.display='none'" style="background:none; border:none; font-size:24px; cursor:pointer; color:var(--text-dim); padding:0; width:30px; height:30px; display:flex; align-items:center; justify-content:center; line-height:1;">×</button>
+    </div>
+
+    <!-- Band name -->
+    <div class="settings-section">
+      <h3>Band name</h3>
+      <div style="display:flex; gap:8px;">
+        <input id="band-name-edit" class="settings-input" style="flex:1;" />
+        <button id="band-name-save" class="settings-btn" onclick="saveBandName()">Save</button>
+      </div>
+    </div>
+
+    <!-- Members -->
+    <div class="settings-section">
+      <h3 id="band-members-header">Members</h3>
+      <div id="band-info-members"></div>
+      <p id="band-leave-error" style="display:none; color:var(--red); font-size:12px; margin-top:8px;"></p>
+      <button class="settings-btn ghost" style="margin-top:12px;" onclick="leaveBand()">Leave band</button>
+    </div>
+
+    <!-- Invite -->
+    <div class="settings-section">
+      <h3>Invite link</h3>
+      <p style="font-size:11px; color:var(--text-dim); margin-bottom:8px;">Share this link with bandmates. They'll join automatically after signing in.</p>
+      <div style="display:flex; gap:8px; align-items:center; margin-bottom:8px;">
+        <input id="invite-link-display" readonly style="flex:1; background:var(--bg); border:1px solid var(--border); color:var(--text); padding:6px 10px; font-size:11px; border-radius:4px; outline:none; font-family:monospace;" />
+        <button id="copy-invite-btn" onclick="copyInviteLink()" style="padding:6px 12px; font-size:12px; background:var(--accent); color:#fff; border:none; border-radius:4px; cursor:pointer; flex-shrink:0;">Copy</button>
+      </div>
+      <button class="settings-btn ghost" onclick="regenerateInvite()">Regenerate link</button>
+      <p style="font-size:11px; color:var(--text-dim); margin-top:6px;">Regenerating invalidates the old link.</p>
+    </div>
+
+    <!-- Voting -->
+    <div class="settings-section">
+      <h3>Voting threshold</h3>
+      <div style="display:flex; align-items:center; gap:12px;">
+        <input id="approval-factor-slider" type="range" min="1" max="5" step="0.5" style="flex:1;" oninput="onApprovalFactorInput()" onchange="saveApprovalFactor()" />
+        <span id="approval-factor-value" style="font-size:13px; font-weight:600; width:30px; text-align:right;">3.5</span>
+      </div>
+      <p id="approval-factor-help" style="font-size:11px; color:var(--text-dim); margin-top:6px;"></p>
+    </div>
+
+    <!-- Danger zone -->
+    <div class="settings-section" id="band-danger-zone" style="display:none;">
+      <h3 style="color:var(--red);">Danger zone</h3>
+      <button class="settings-btn danger" onclick="deleteBand()">Delete band</button>
+      <p style="font-size:11px; color:var(--text-dim); margin-top:6px;">Permanently deletes the band and its shared set list. Songs revert to personal libraries.</p>
+    </div>
+  </div>
+</div>
+
+<!-- My Settings Modal -->
+<div id="user-settings-modal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,.7); z-index:1500; flex-direction:column; align-items:center; justify-content:center; padding:20px;">
+  <div style="background:var(--surface); border:1px solid var(--border); border-radius:var(--radius); padding:24px; max-width:460px; width:100%; max-height:90vh; overflow-y:auto;">
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
+      <h2 style="margin:0; font-size:18px;">My Settings</h2>
+      <button onclick="document.getElementById('user-settings-modal').style.display='none'" style="background:none; border:none; font-size:24px; cursor:pointer; color:var(--text-dim); padding:0; width:30px; height:30px; display:flex; align-items:center; justify-content:center; line-height:1;">×</button>
+    </div>
+
+    <!-- Profile -->
+    <div class="settings-section">
+      <h3>Profile</h3>
+      <label class="settings-label">Display name</label>
+      <input id="profile-display-name" class="settings-input" placeholder="How bandmates see you" style="margin-bottom:14px;" />
+      <label class="settings-label">Band role / instruments</label>
+      <div id="profile-roles" style="display:flex; flex-wrap:wrap; gap:8px; margin-bottom:10px;"></div>
+      <div style="display:flex; gap:8px;">
+        <input id="profile-role-add" class="settings-input" placeholder="Add a custom role…" style="flex:1;" onkeydown="if(event.key==='Enter'){addCustomRole();event.preventDefault();}" />
+        <button class="settings-btn ghost" onclick="addCustomRole()">＋ Add</button>
+      </div>
+      <button id="profile-save" class="settings-btn" style="margin-top:14px;" onclick="saveProfile()">Save profile</button>
+    </div>
+
+    <!-- Tunings -->
+    <div class="settings-section">
+      <h3>My tunings</h3>
+      <div id="settings-tunings-list" style="display:flex; flex-wrap:wrap; gap:8px; margin-bottom:10px;"></div>
+      <div style="display:flex; gap:8px;">
+        <input id="settings-tuning-add" class="settings-input" placeholder="e.g., Open G" style="flex:1;" onkeydown="if(event.key==='Enter'){addTuningFromSettings();event.preventDefault();}" />
+        <button class="settings-btn ghost" onclick="addTuningFromSettings()">＋ Add</button>
+      </div>
+    </div>
+
+    <!-- Notifications -->
+    <div class="settings-section">
+      <h3>Notifications</h3>
+      <div class="toggle-row">
+        <div><div class="toggle-label">A song needs your vote</div><div class="toggle-sub">When a bandmate proposes a song</div></div>
+        <label class="switch"><input type="checkbox" id="notif-new_proposal" onchange="saveNotifPrefs()"><span class="slider"></span></label>
+      </div>
+      <div class="toggle-row">
+        <div><div class="toggle-label">A proposal failed</div><div class="toggle-sub">When a proposed song can't be approved</div></div>
+        <label class="switch"><input type="checkbox" id="notif-proposal_failed" onchange="saveNotifPrefs()"><span class="slider"></span></label>
+      </div>
+      <div class="toggle-row">
+        <div><div class="toggle-label">A song was archived</div><div class="toggle-sub">When an approved song gets demoted</div></div>
+        <label class="switch"><input type="checkbox" id="notif-song_archived" onchange="saveNotifPrefs()"><span class="slider"></span></label>
+      </div>
+    </div>
+
+    <!-- Account -->
+    <div class="settings-section">
+      <h3>Account</h3>
+      <div style="display:flex; gap:10px;">
+        <button class="settings-btn ghost" onclick="signOut()">Sign Out</button>
+        <button class="settings-btn ghost" onclick="document.getElementById('user-settings-modal').style.display='none'; leaveBand();">Leave band</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<style>
+  /* ── App menu + settings UI ──────────────────────────────────────────── */
+  .app-menu-item {
+    display: block; width: 100%; text-align: left;
+    background: transparent; border: none; color: var(--text);
+    padding: 10px 14px; font-size: 13px; cursor: pointer;
+  }
+  .app-menu-item:hover { background: var(--accent-dim); }
+
+  .settings-section { margin-bottom: 22px; }
+  .settings-section:last-child { margin-bottom: 0; }
+  .settings-section h3 {
+    font-size: 12px; font-weight: 700; text-transform: uppercase;
+    letter-spacing: .04em; color: var(--text-dim); margin: 0 0 10px;
+  }
+  .settings-label {
+    display: block; font-size: 12px; font-weight: 600;
+    color: var(--text-dim); margin-bottom: 6px;
+  }
+  .settings-input {
+    width: 100%; background: var(--bg); border: 1px solid var(--border);
+    color: var(--text); padding: 8px 12px; font-size: 13px;
+    border-radius: 4px; outline: none;
+  }
+  .settings-btn {
+    background: var(--accent); color: #fff; border: none; border-radius: 6px;
+    padding: 8px 16px; font-size: 13px; font-weight: 600; cursor: pointer;
+  }
+  .settings-btn.ghost {
+    background: transparent; color: var(--text-dim); border: 1px solid var(--border);
+  }
+  .settings-btn.danger { background: var(--red); }
+  .settings-btn:disabled { opacity: .5; cursor: default; }
+
+  .role-chip {
+    font-size: 12px; padding: 5px 12px; border-radius: 16px; cursor: pointer;
+    border: 1px solid var(--border); background: transparent; color: var(--text-dim);
+    user-select: none;
+  }
+  .role-chip.selected {
+    background: var(--accent-dim); border-color: var(--accent); color: #fff;
+  }
+
+  .tag-pill {
+    font-size: 10px; padding: 2px 7px; border-radius: 9px;
+    background: var(--accent-dim); color: #fff;
+  }
+
+  .toggle-row {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 10px 0; border-bottom: 1px solid var(--border);
+  }
+  .toggle-row:last-child { border-bottom: none; }
+  .toggle-row .toggle-label { font-size: 13px; }
+  .toggle-row .toggle-sub { font-size: 11px; color: var(--text-dim); }
+  .switch { position: relative; width: 40px; height: 22px; flex-shrink: 0; }
+  .switch input { opacity: 0; width: 0; height: 0; }
+  .switch .slider {
+    position: absolute; inset: 0; background: var(--border); border-radius: 22px;
+    transition: .2s; cursor: pointer;
+  }
+  .switch .slider::before {
+    content: ""; position: absolute; height: 16px; width: 16px; left: 3px; bottom: 3px;
+    background: #fff; border-radius: 50%; transition: .2s;
+  }
+  .switch input:checked + .slider { background: var(--accent); }
+  .switch input:checked + .slider::before { transform: translateX(18px); }
+</style>
+
 <header>
-  <h1>🎸 Rehearsal Planner</h1>
-  <button id="add-song-btn" style="background:var(--accent); color:#fff; border:none; border-radius:6px; padding:8px 20px; font-size:13px; font-weight:600; cursor:pointer; flex-shrink:0;">+ Add Song</button>
-  <div id="user-info" style="display:none; margin-left:auto; align-items:center; gap:12px;">
-    <span id="user-email" style="font-size:12px; color:var(--text-dim);"></span>
-    <button onclick="signOut()" style="padding:5px 12px; font-size:12px; background:transparent; color:var(--text-dim); border:1px solid var(--border); border-radius:6px; cursor:pointer;">Sign Out</button>
+  <div class="hdr-top">
+    <div class="hdr-left">
+      <div class="hdr-user-wrap">
+        <button id="band-menu-btn" class="hdr-icon-btn" title="Band menu" onclick="toggleBandMenu(event)" style="display:none;">☰</button>
+        <div id="band-menu" class="hdr-menu" style="display:none;">
+          <div class="hdr-menu-label">🎸 <span id="band-name-display">Band</span></div>
+          <div class="hdr-menu-sep"></div>
+          <button class="app-menu-item" onclick="openBandSettingsModal(); closeAllMenus();">⚙️ Band Settings</button>
+        </div>
+      </div>
+      <div class="hdr-logo"><span class="hdr-logo-mark">🎸</span>Rehearsal Planner</div>
+    </div>
+    <div id="user-info" class="hdr-right" style="display:none;">
+      <button id="add-song-btn" class="hdr-add-btn" title="Add song"><span class="hdr-add-icon">＋</span><span class="hdr-add-label"> Add Song</span></button>
+      <button id="notif-bell-btn" class="hdr-icon-btn" title="Songs to vote on" onclick="openVotingModal()" style="display:none;">
+        🔔<span id="notif-badge" style="display:none;"></span>
+      </button>
+      <div class="hdr-user-wrap">
+        <button id="user-avatar-btn" class="hdr-avatar" title="Account" onclick="toggleUserMenu(event)"><span id="user-avatar-initial">?</span></button>
+        <div id="user-menu" class="hdr-menu" style="display:none;">
+          <div class="hdr-menu-identity">
+            <div class="id-name" id="menu-identity-name"></div>
+            <div class="id-email" id="menu-identity-email"></div>
+          </div>
+          <div class="hdr-menu-sep"></div>
+          <button class="app-menu-item" onclick="openUserSettingsModal(); closeAllMenus();">👤 My Settings</button>
+          <div class="hdr-menu-sep"></div>
+          <button class="app-menu-item" onclick="signOut()">↩ Sign Out</button>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div id="global-search-row" class="hdr-search" style="display:none;">
+    <span class="hdr-search-icon">🔎</span>
+    <input id="global-search" type="text" placeholder="Search songs…" autocomplete="off" />
+    <button id="global-search-clear" title="Clear search">×</button>
   </div>
 </header>
 
@@ -1369,12 +1894,6 @@
       <h2>Song Library</h2>
       <span class="count" id="library-count">0 songs</span>
     </div>
-    <div style="padding:12px; background:var(--bg); border-bottom:1px solid var(--border);">
-      <div style="position:relative; display:flex; align-items:center;">
-        <input id="library-search" type="text" placeholder="Search song library" style="width:100%; background:var(--surface); border:1px solid var(--border); color:var(--text); padding:6px 10px; padding-right:28px; font-size:12px; border-radius:4px; outline:none; transition:all 0.2s;" />
-        <button id="library-search-clear" style="position:absolute; right:6px; background:none; border:none; color:var(--text-dim); cursor:pointer; padding:4px; display:none; font-size:14px; line-height:1; hover:color:var(--text);" title="Clear search">×</button>
-      </div>
-    </div>
     <div class="song-list" id="library-list">
       <div class="empty-state">
         <span class="icon">🎵</span>
@@ -1389,12 +1908,6 @@
     <div class="panel-header">
       <h2>Set List</h2>
       <span class="count" id="setlist-count">0 songs</span>
-    </div>
-    <div style="padding:12px; background:var(--bg); border-bottom:1px solid var(--border);">
-      <div style="position:relative; display:flex; align-items:center;">
-        <input id="setlist-search" type="text" placeholder="Search set list" style="width:100%; background:var(--surface); border:1px solid var(--border); color:var(--text); padding:6px 10px; padding-right:28px; font-size:12px; border-radius:4px; outline:none; transition:all 0.2s;" />
-        <button id="setlist-search-clear" style="position:absolute; right:6px; background:none; border:none; color:var(--text-dim); cursor:pointer; padding:4px; display:none; font-size:14px; line-height:1; hover:color:var(--text);" title="Clear search">×</button>
-      </div>
     </div>
     <div class="song-list" id="setlist-list">
       <div class="empty-state" id="setlist-empty">
@@ -1423,6 +1936,18 @@
 const THRESHOLD_WARN = 2 * 3600;       // 2h00 in seconds
 const THRESHOLD_MAX  = 2.5 * 3600;    // 2h30 in seconds
 
+// 5-point Likert voting scale
+const LIKERT_VOTES = [
+  { v: '5', emoji: '❤️', label: 'Love it',  tip: 'I would love to / love playing this song' },
+  { v: '4', emoji: '👍', label: 'Like it',  tip: 'This is solid' },
+  { v: '3', emoji: '😐', label: 'Neutral',  tip: 'No strong feelings either way' },
+  { v: '2', emoji: '👎', label: 'Pass',     tip: "I'd rather not" },
+  { v: '1', emoji: '🚫', label: 'Hard no',  tip: 'Skill, range, gear, or strong dislike' },
+];
+const LIKERT_CHIP_COLOR = { '5': 'rgba(62,207,142,.2)', '4': 'rgba(62,207,172,.2)', '3': 'rgba(140,140,160,.2)', '2': 'rgba(245,140,50,.2)', '1': 'rgba(240,82,82,.2)' };
+const LIKERT_CHIP_BORDER= { '5': '#3ecf8e', '4': '#3ecfac', '3': '#8c8ca0', '2': '#f58c32', '1': '#f05252' };
+const LIKERT_EMOJI      = { '5': '❤️', '4': '👍', '3': '😐', '2': '👎', '1': '🚫' };
+
 let libraryData = [];   // [{id, name, duration_raw, duration_seconds, plays, extra}]
 let setListIds  = [];   // ordered list of ids currently in the set list
 let librarySearchText = '';  // tracks search text in library
@@ -1430,8 +1955,22 @@ let setListSearchText = '';  // tracks search text in set list
 let expandedSongId = null;  // tracks which song card is currently expanded
 let allTuningValues = ['E standard', 'Eb', 'Drop D', 'Drop C#'];  // available tuning values across app
 
+let _bandData = null;       // {id, name, invite_token, role, members:[...]}
+let _userProfile = null;    // {display_name, roles:[...], notif_prefs:{...}}
+let _currentUserId = null;  // sub from JWT
+let _userEmail = '';        // current user's auth email
+const ROLE_OPTIONS = ['Vocals', 'Guitar', 'Bass', 'Drums', 'Synth', 'Keys', 'Turntables'];
+let _votingProposals = [];  // proposals pending in voting modal
+let _votingIndex = 0;       // current index in voting modal
+let _notifPollTimer = null; // setInterval handle for notification polling
+
 // ── Auth ──────────────────────────────────────────────────────────────────────
 const NEON_AUTH_BASE = document.querySelector('meta[name="neon-auth-base-url"]')?.content || '';
+
+// On http://localhost the Neon Auth session cookie (SameSite=None; Secure, *.neon.tech)
+// is cross-site and gets blocked by the browser, so the direct /token exchange fails.
+// In that case we route sign-in + JWT refresh through the server-side /api/dev/* proxy.
+const IS_LOCAL_DEV = ['localhost', '127.0.0.1', '0.0.0.0'].includes(location.hostname);
 
 let _accessToken = sessionStorage.getItem('rp_access_token') || null;
 let _currentAuthMode = 'signin';
@@ -1485,7 +2024,23 @@ async function handleAuthSubmit(e) {
   }
 }
 
+// Local dev: sign in/up via the server-side proxy that handles the cross-site cookie.
+async function devAuth(mode, email, password) {
+  const res = await fetch('/api/dev/login', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ mode, email, password, name: email.split('@')[0] }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || 'Authentication failed');
+  _accessToken = data.token;
+  sessionStorage.setItem('rp_access_token', _accessToken);
+  if (data.devSession) sessionStorage.setItem('rp_dev_session', data.devSession);
+  onAuthSuccess(data.email || email);
+}
+
 async function neonSignUp(email, password) {
+  if (IS_LOCAL_DEV) return devAuth('signup', email, password);
   // Better Auth sign-up requires a `name` field. Sets HttpOnly session cookie on success.
   const res = await fetch(`${NEON_AUTH_BASE}/sign-up/email`, {
     method: 'POST',
@@ -1500,6 +2055,7 @@ async function neonSignUp(email, password) {
 }
 
 async function neonSignIn(email, password) {
+  if (IS_LOCAL_DEV) return devAuth('signin', email, password);
   const res = await fetch(`${NEON_AUTH_BASE}/sign-in/email`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -1515,6 +2071,22 @@ async function neonSignIn(email, password) {
 // Exchange the HttpOnly session cookie for a fresh JWT (15-min lifetime).
 // Must be called with credentials:'include' so the browser sends the cookie.
 async function fetchNeonJwt() {
+  // Local dev: refresh via the proxy, replaying the stored server-side session cookie.
+  if (IS_LOCAL_DEV) {
+    const devSession = sessionStorage.getItem('rp_dev_session');
+    if (!devSession) throw new Error('No local dev session');
+    const res = await fetch('/api/dev/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ devSession }),
+    });
+    if (!res.ok) throw new Error('Failed to refresh JWT (dev session expired)');
+    const data = await res.json();
+    if (!data.token) throw new Error('JWT response missing token field');
+    _accessToken = data.token;
+    sessionStorage.setItem('rp_access_token', _accessToken);
+    return _accessToken;
+  }
   const res = await fetch(`${NEON_AUTH_BASE}/token`, {
     method: 'GET',
     credentials: 'include',
@@ -1545,12 +2117,23 @@ async function apiFetch(url, options = {}) {
 
 function signOut() {
   _accessToken = null;
+  _bandData = null;
+  _userProfile = null;
+  _userEmail = '';
+  _currentUserId = null;
+  closeAppMenu();
+  document.getElementById('band-info-modal').style.display = 'none';
+  document.getElementById('user-settings-modal').style.display = 'none';
+  clearInterval(_notifPollTimer);
+  _notifPollTimer = null;
   sessionStorage.removeItem('rp_access_token');
+  sessionStorage.removeItem('rp_dev_session');
   libraryData     = [];
   setListIds      = [];
   allTuningValues = ['E standard', 'Eb', 'Drop D', 'Drop C#'];
-  document.getElementById('auth-overlay').style.display = 'flex';
-  document.getElementById('user-info').style.display   = 'none';
+  document.getElementById('auth-overlay').style.display       = 'flex';
+  document.getElementById('user-info').style.display          = 'none';
+  document.getElementById('band-setup-overlay').style.display = 'none';
   document.getElementById('auth-email').value    = '';
   document.getElementById('auth-password').value = '';
   const submitBtn = document.getElementById('auth-submit-btn');
@@ -1563,8 +2146,60 @@ function signOut() {
 function onAuthSuccess(email) {
   document.getElementById('auth-overlay').style.display  = 'none';
   document.getElementById('user-info').style.display     = 'flex';
-  document.getElementById('user-email').textContent      = email;
-  loadAppData();
+  _userEmail = email;
+  updateMenuIdentity();
+
+  try {
+    const payload = JSON.parse(atob(_accessToken.split('.')[1]));
+    _currentUserId = payload.sub || null;
+  } catch {}
+
+  // Handle ?join=TOKEN invite link
+  const urlToken = new URLSearchParams(location.search).get('join');
+  if (urlToken) sessionStorage.setItem('pending_band_token', urlToken);
+
+  const pendingToken = sessionStorage.getItem('pending_band_token');
+  if (pendingToken) {
+    sessionStorage.removeItem('pending_band_token');
+    apiFetch('/api/band/join', { method: 'POST', body: JSON.stringify({ invite_token: pendingToken }) })
+      .then(() => loadBandAndAppData())
+      .catch(() => loadBandAndAppData());
+  } else {
+    loadBandAndAppData();
+  }
+}
+
+async function loadBandAndAppData() {
+  try {
+    const res = await apiFetch('/api/band');
+    if (res.ok) {
+      _bandData = await res.json();
+    }
+  } catch {}
+
+  try {
+    const pres = await apiFetch('/api/profile');
+    if (pres.ok) _userProfile = await pres.json();
+  } catch {}
+  updateMenuIdentity();
+
+  if (_bandData) {
+    document.getElementById('band-name-display').textContent = _bandData.name;
+    setBandChrome(true);
+    loadAppData();
+    startNotifPolling();
+  } else {
+    setBandChrome(false);
+    document.getElementById('band-setup-overlay').style.display = 'flex';
+  }
+}
+
+// Show/hide the band-dependent header controls (☰ band menu, 🔔 bell, search bar)
+function setBandChrome(hasBand) {
+  const disp = hasBand ? 'flex' : 'none';
+  document.getElementById('band-menu-btn').style.display    = disp;
+  document.getElementById('notif-bell-btn').style.display   = disp;
+  document.getElementById('global-search-row').style.display = disp;
 }
 
 // ── API Data Layer ────────────────────────────────────────────────────────────
@@ -1591,6 +2226,7 @@ async function loadAppData() {
     renderLibrary();
     renderSetList();
     fetchAllAlbumArt();
+    updateNotifBadge(countUnvotedProposals());
   } catch (err) {
     console.error('Failed to load app data:', err);
     showToast('Failed to load your data. Please refresh.');
@@ -1721,21 +2357,18 @@ function makeSongCard(song, inSetList) {
   const info = document.createElement('div');
   info.className = 'song-info';
 
+  // Line 1: Artist
   const artistEl = document.createElement('div');
   artistEl.className = 'song-artist';
   artistEl.textContent = song.extra?.Artist || '—';
 
+  // Line 2: Song name + tuning badge inline
   const nameEl = document.createElement('div');
   nameEl.className = 'song-name';
-  nameEl.style.display = 'flex';
-  nameEl.style.alignItems = 'center';
-  nameEl.style.gap = '6px';
   nameEl.title = song.name;
-
   const nameText = document.createElement('span');
   nameText.textContent = song.name;
   nameEl.appendChild(nameText);
-
   const tuning = song.extra?.OurTuning || song.extra?.Tuning;
   if (tuning) {
     const tuningBadge = document.createElement('span');
@@ -1744,9 +2377,26 @@ function makeSongCard(song, inSetList) {
     nameEl.appendChild(tuningBadge);
   }
 
+  // Line 3: Duration + optional status badge
   const durEl = document.createElement('div');
   durEl.className = 'song-dur';
-  durEl.textContent = song.duration_raw || '—';
+  const durText = document.createElement('span');
+  durText.textContent = song.duration_raw || '—';
+  durEl.appendChild(durText);
+  const ps = song.extra?.proposalStatus;
+  const ss = song.extra?.songStatus;
+  let statusInfo = null;
+  if (ps === 'pending')  statusInfo = { label: 'Proposed', cls: 'proposed' };
+  else if (ps === 'approved') statusInfo = { label: 'Learning', cls: 'learning' };
+  else if (ps === 'rejected') statusInfo = { label: 'Resting',  cls: 'resting'  };
+  else if (ss) statusInfo = { label: ss, cls: ss.toLowerCase() };
+  if (statusInfo) {
+    const statusBadge = document.createElement('span');
+    statusBadge.className = `status-badge ${statusInfo.cls}`;
+    statusBadge.textContent = statusInfo.label;
+    durEl.appendChild(statusBadge);
+  }
+
   info.append(artistEl, nameEl, durEl);
 
   // Expand button
@@ -1786,25 +2436,33 @@ function makeSongCard(song, inSetList) {
     plays.append(decBtn, playsCount, incBtn);
   }
 
-  row.append(albumArtEl, handle, info, expandBtn, plays);
+  row.append(albumArtEl, info);
+
+  const actionsRow = document.createElement('div');
+  actionsRow.className = 'song-card-actions';
+
+  // Drag handle on far left
+  actionsRow.appendChild(handle);
+
+  // Setlist: playthrus control
+  if (inSetList) {
+    actionsRow.appendChild(plays);
+  }
+
+  const hasVotableProposal = _bandData && song.extra?.proposalId &&
+    (song.extra?.proposalStatus === 'pending' || song.extra?.proposalStatus === 'approved');
+
+  // Spacer pushes action buttons to the right
+  const spacer = document.createElement('div');
+  spacer.style.flex = '1';
+  actionsRow.appendChild(spacer);
 
   if (inSetList) {
-    const removeBtn = document.createElement('button');
-    removeBtn.className = 'remove-btn';
-    removeBtn.textContent = '×';
-    removeBtn.title = 'Remove from set list';
-    removeBtn.addEventListener('click', e => {
-      e.stopPropagation();
-      setListIds = setListIds.filter(id => id !== song.id);
-      saveSetlistDebounced();
-      renderSetList();
-      renderLibrary();
-    });
-    row.append(removeBtn);
+    actionsRow.append(expandBtn);
   } else {
     const addBtn = document.createElement('button');
-    addBtn.className = 'ghost add-btn';
-    addBtn.textContent = '+ Add';
+    addBtn.className = 'add-btn';
+    addBtn.textContent = '+ Set';
     addBtn.title = 'Add to set list';
     addBtn.addEventListener('click', e => {
       e.stopPropagation();
@@ -1816,21 +2474,24 @@ function makeSongCard(song, inSetList) {
       }
     });
     if (setListIds.includes(song.id)) {
-      addBtn.textContent = '✓ Added';
+      addBtn.textContent = '✓ Set';
       addBtn.disabled = true;
-      addBtn.style.opacity = '0.5';
     }
-    row.append(addBtn);
+    actionsRow.append(addBtn, expandBtn);
   }
 
-  card.append(row);
+  card.append(row, actionsRow);
+
+  // Unvoted highlight
+  if (hasVotableProposal && !song.extra?.userVote) card.classList.add('needs-vote');
 
   // Click handler for card expansion (avoid drag handle and buttons)
   card.addEventListener('click', e => {
     // Don't toggle if clicking on interactive elements
     if (e.target.closest('.drag-handle') ||
         e.target.closest('button') ||
-        e.target.closest('select')) {
+        e.target.closest('select') ||
+        e.target.closest('.expanded-info')) {
       return;
     }
     expandedSongId = expandedSongId === song.id ? null : song.id;
@@ -1842,6 +2503,108 @@ function makeSongCard(song, inSetList) {
   if (isExpanded) {
     const expandedSection = document.createElement('div');
     expandedSection.className = 'expanded-info';
+
+    if (_bandData && song.extra?.proposerName) {
+      const proposerEl = document.createElement('p');
+      proposerEl.style.cssText = 'font-size:11px; color:var(--text-dim); margin:0;';
+      proposerEl.textContent = `Added by ${song.extra.proposerName}`;
+      expandedSection.appendChild(proposerEl);
+    }
+
+    // ── Proposal context block (mirrors voting modal) ─────────────────────────
+    if (_bandData && song.extra?.proposalId &&
+        (song.extra?.proposalStatus === 'pending' || song.extra?.proposalStatus === 'approved')) {
+      const propBlock = document.createElement('div');
+      propBlock.style.cssText = 'display:flex; flex-direction:column; gap:6px; padding:10px 12px; background:var(--bg); border-radius:6px; border:1px solid var(--border);';
+
+      // Spotify preview link
+      if (song.extra?.spotifyUrl) {
+        const sLink = document.createElement('a');
+        sLink.href = song.extra.spotifyUrl;
+        sLink.target = '_blank'; sLink.rel = 'noopener noreferrer';
+        sLink.textContent = '▶ Preview on Spotify';
+        sLink.style.cssText = 'font-size:11px; color:var(--text-dim); text-decoration:none;';
+        sLink.addEventListener('mouseover', () => { sLink.style.color = 'var(--accent)'; });
+        sLink.addEventListener('mouseout',  () => { sLink.style.color = 'var(--text-dim)'; });
+        propBlock.appendChild(sLink);
+      }
+
+      // Votes from others chips
+      const votes = song.extra?.proposalVotes || [];
+      if (votes.length > 0) {
+        const votesLabel = document.createElement('p');
+        votesLabel.style.cssText = 'font-size:11px; color:var(--text-dim); margin:0;';
+        votesLabel.textContent = 'Band ratings:';
+        propBlock.appendChild(votesLabel);
+        const chipsRow = document.createElement('div');
+        chipsRow.style.cssText = 'display:flex; gap:5px; flex-wrap:wrap;';
+        votes.forEach(v => {
+          const chip = document.createElement('span');
+          chip.style.cssText = `font-size:11px; padding:2px 8px; border-radius:9px; background:${LIKERT_CHIP_COLOR[v.vote] || 'var(--border)'}; border:1px solid ${LIKERT_CHIP_BORDER[v.vote] || 'var(--border)'}; display:inline-flex; align-items:center; gap:3px; cursor:default;`;
+          chip.innerHTML = `${LIKERT_EMOJI[v.vote] || ''} <span style="color:var(--text-dim);">${v.name}</span>`;
+          chipsRow.appendChild(chip);
+        });
+        propBlock.appendChild(chipsRow);
+      }
+
+      // Your vote
+      const voteControl = document.createElement('div');
+      voteControl.className = 'vote-control';
+
+      async function doCardVote(v) {
+        song.extra.userVote = v;
+        if (inSetList) renderSetList(); else renderLibrary();
+        try {
+          const res = await apiFetch('/api/band/vote', {
+            method: 'POST',
+            body: JSON.stringify({ proposal_id: song.extra.proposalId, vote: v }),
+          });
+          if (!res.ok) { showToast('Vote failed'); return; }
+          const result = await res.json();
+          song.extra.proposalScore = result.score;
+          if (result.status === 'rejected' || result.status === 'archived') {
+            const songsRes = await apiFetch('/api/songs');
+            if (songsRes.ok) {
+              libraryData = await songsRes.json();
+              const slRes = await apiFetch('/api/setlist');
+              if (slRes.ok) setListIds = await slRes.json();
+            }
+          } else if (result.status === 'approved' && song.extra.proposalStatus === 'pending') {
+            const songsRes = await apiFetch('/api/songs');
+            if (songsRes.ok) {
+              libraryData = await songsRes.json();
+              const slRes = await apiFetch('/api/setlist');
+              if (slRes.ok) setListIds = await slRes.json();
+            }
+          }
+          renderLibrary(); renderSetList();
+          updateNotifBadge(countUnvotedProposals());
+        } catch { showToast('Vote failed'); }
+      }
+
+      LIKERT_VOTES.forEach(lv => {
+        const btn = document.createElement('button');
+        btn.className = `vote-btn lk-${lv.v}${song.extra?.userVote === lv.v ? ' active' : ''}`;
+        btn.textContent = lv.emoji;
+        btn.title = `${lv.label} — ${lv.tip}`;
+        btn.addEventListener('click', e => {
+          e.stopPropagation();
+          doCardVote(lv.v);
+        });
+        voteControl.appendChild(btn);
+      });
+      propBlock.append(voteControl);
+
+      // Score line
+      const bandSize = _bandData?.members?.length || 1;
+      const scoreEl = document.createElement('p');
+      scoreEl.style.cssText = 'font-size:11px; color:var(--text-dim); margin:0;';
+      const threshold = Math.ceil(bandSize * 3.5);
+      scoreEl.textContent = `Score: ${song.extra.proposalScore ?? 0}/${bandSize * 5} · need ${threshold} to approve`;
+      propBlock.appendChild(scoreEl);
+
+      expandedSection.appendChild(propBlock);
+    }
 
     // Helper function to create tuning dropdown
     function createTuningDropdown(labelText, value, onChangeCallback, otherValue) {
@@ -1934,6 +2697,29 @@ function makeSongCard(song, inSetList) {
       }
     }, song.extra?.RecordedTuning);
 
+    // Solo user status field (band users have status driven by voting)
+    if (!_bandData) {
+      const statusField = document.createElement('div');
+      statusField.className = 'expanded-field expanded-field-inline';
+      const statusLabel = document.createElement('label');
+      statusLabel.textContent = 'Status';
+      const statusSelect = document.createElement('select');
+      statusSelect.style.cssText = 'padding: 3px 6px; border-radius: 4px; border: 1px solid var(--border); background: var(--surface); color: var(--text); font-size: 12px;';
+      ['—', 'Active', 'Learning', 'Proposed', 'Resting', 'Shelved'].forEach(opt => {
+        const o = document.createElement('option');
+        o.value = opt === '—' ? '' : opt;
+        o.textContent = opt;
+        if ((song.extra?.songStatus || '') === o.value) o.selected = true;
+        statusSelect.appendChild(o);
+      });
+      statusSelect.addEventListener('change', e => {
+        song.extra = song.extra || {};
+        song.extra.songStatus = e.target.value || undefined;
+      });
+      statusField.append(statusLabel, statusSelect);
+      expandedSection.appendChild(statusField);
+    }
+
     expandedSection.append(recordedField, ourField);
 
     const actions = document.createElement('div');
@@ -1951,18 +2737,31 @@ function makeSongCard(song, inSetList) {
     });
 
     const removeLibraryBtn = document.createElement('button');
-    removeLibraryBtn.className = 'remove-btn';
-    removeLibraryBtn.textContent = 'Remove from Library';
-    removeLibraryBtn.addEventListener('click', e => {
-      e.stopPropagation();
-      libraryData = libraryData.filter(s => s.id !== song.id);
-      setListIds = setListIds.filter(id => id !== song.id);
-      apiDeleteSong(song.id);
-      saveSetlistDebounced();
-      expandedSongId = null;
-      renderLibrary();
-      renderSetList();
-    });
+    if (inSetList) {
+      removeLibraryBtn.className = 'ghost';
+      removeLibraryBtn.textContent = '❌ Remove from Set';
+      removeLibraryBtn.addEventListener('click', e => {
+        e.stopPropagation();
+        setListIds = setListIds.filter(id => id !== song.id);
+        saveSetlistDebounced();
+        expandedSongId = null;
+        renderSetList();
+        renderLibrary();
+      });
+    } else {
+      removeLibraryBtn.className = 'remove-btn';
+      removeLibraryBtn.textContent = 'Remove from Library';
+      removeLibraryBtn.addEventListener('click', e => {
+        e.stopPropagation();
+        libraryData = libraryData.filter(s => s.id !== song.id);
+        setListIds = setListIds.filter(id => id !== song.id);
+        apiDeleteSong(song.id);
+        saveSetlistDebounced();
+        expandedSongId = null;
+        renderLibrary();
+        renderSetList();
+      });
+    }
 
     const collapseBtn = document.createElement('button');
     collapseBtn.className = 'collapse-btn';
@@ -1990,8 +2789,8 @@ function renderLibrary() {
 
   let filteredData = libraryData;
 
-  // Exclude songs that are already in the set list (they should only appear in Set List, not Library)
-  filteredData = filteredData.filter(s => !setListIds.includes(s.id));
+  // Exclude songs already in the set list and archived songs
+  filteredData = filteredData.filter(s => !setListIds.includes(s.id) && s.extra?.Status !== 'Archived');
   const totalCount = filteredData.length;  // Count before search filter
 
   if (librarySearchText) {
@@ -2001,8 +2800,33 @@ function renderLibrary() {
     );
   }
 
+  // Sort: pending proposals first (unvoted before voted), then everything else
+  filteredData = [...filteredData].sort((a, b) => {
+    const ap = a.extra?.proposalStatus === 'pending';
+    const bp = b.extra?.proposalStatus === 'pending';
+    if (ap !== bp) return ap ? -1 : 1;
+    if (ap && bp) {
+      const au = !a.extra?.userVote, bu = !b.extra?.userVote;
+      if (au !== bu) return au ? -1 : 1;
+    }
+    return 0;
+  });
+
   if (!filteredData.length) {
-    list.innerHTML = `<div class="empty-state"><span class="icon">🎵</span><p>No songs found.</p></div>`;
+    const empty = document.createElement('div');
+    empty.className = 'empty-state';
+    empty.innerHTML = `<span class="icon">🎵</span><p>No songs found.</p>`;
+    // Hybrid search: offer to add a missing song from Spotify
+    if (librarySearchText) {
+      const q = librarySearchText;
+      const btn = document.createElement('button');
+      btn.className = 'spotify-fallback-btn';
+      btn.textContent = `🔎 Search Spotify for “${q}”`;
+      btn.addEventListener('click', () => openAddSongWithQuery(q));
+      empty.appendChild(btn);
+    }
+    list.innerHTML = '';
+    list.appendChild(empty);
     const countText = librarySearchText ? `0 of ${totalCount} songs` : '0 songs';
     document.getElementById('library-count').textContent = countText;
     return;
@@ -2382,49 +3206,25 @@ async function fetchAllAlbumArt() {
   }
 }
 
-// Search input listeners
-const librarySearchInput = document.getElementById('library-search');
-const librarySearchClear = document.getElementById('library-search-clear');
+// Global header search — filters BOTH the Library and the Set List at once
+const globalSearchInput = document.getElementById('global-search');
+const globalSearchClear = document.getElementById('global-search-clear');
 
-librarySearchInput.addEventListener('input', e => {
-  librarySearchText = e.target.value;
-  // Show/hide clear button
-  librarySearchClear.style.display = librarySearchText ? 'block' : 'none';
-  // Add/remove active class
-  librarySearchInput.classList.toggle('active', !!librarySearchText);
+function applyGlobalSearch(value) {
+  librarySearchText = value;
+  setListSearchText = value;
+  globalSearchClear.style.display = value ? 'block' : 'none';
   renderLibrary();
-});
-
-librarySearchClear.addEventListener('click', e => {
-  e.preventDefault();
-  librarySearchInput.value = '';
-  librarySearchText = '';
-  librarySearchClear.style.display = 'none';
-  librarySearchInput.classList.remove('active');
-  librarySearchInput.focus();
-  renderLibrary();
-});
-
-const setlistSearchInput = document.getElementById('setlist-search');
-const setlistSearchClear = document.getElementById('setlist-search-clear');
-
-setlistSearchInput.addEventListener('input', e => {
-  setListSearchText = e.target.value;
-  // Show/hide clear button
-  setlistSearchClear.style.display = setListSearchText ? 'block' : 'none';
-  // Add/remove active class
-  setlistSearchInput.classList.toggle('active', !!setListSearchText);
   renderSetList();
-});
+}
 
-setlistSearchClear.addEventListener('click', e => {
+globalSearchInput.addEventListener('input', e => applyGlobalSearch(e.target.value));
+
+globalSearchClear.addEventListener('click', e => {
   e.preventDefault();
-  setlistSearchInput.value = '';
-  setListSearchText = '';
-  setlistSearchClear.style.display = 'none';
-  setlistSearchInput.classList.remove('active');
-  setlistSearchInput.focus();
-  renderSetList();
+  globalSearchInput.value = '';
+  applyGlobalSearch('');
+  globalSearchInput.focus();
 });
 
 // ── Add Song Modal ────────────────────────────────────────────────────────
@@ -2445,6 +3245,21 @@ if (addSongBtn) {
     const spotifyInput = document.getElementById('add-song-spotify-input');
     if (spotifyInput) spotifyInput.focus();
   });
+}
+
+// Hybrid search fallback: open the Add Song modal on the Spotify tab,
+// prefilled with the query, and run the search immediately.
+function openAddSongWithQuery(query) {
+  addSongModal.style.display = 'flex';
+  addSongDestination = null;
+  const spotifyTab = document.querySelector('.add-song-tab[data-tab="spotify"]');
+  if (spotifyTab) spotifyTab.click();  // ensures Spotify tab is active
+  const spotifyInput = document.getElementById('add-song-spotify-input');
+  if (spotifyInput) {
+    spotifyInput.value = query;
+    spotifyInput.focus();
+  }
+  performAddSongSpotifySearch();
 }
 
 if (addSongModalClose) {
@@ -2671,6 +3486,644 @@ async function addCustomSong(destination) {
   addSongActions.style.display = 'none';
   addSongModal.style.display = 'none';
 }
+
+// ── Band Setup ────────────────────────────────────────────────────────────────
+
+document.getElementById('create-band-btn').addEventListener('click', async () => {
+  const name = document.getElementById('band-name-input').value.trim();
+  const errEl = document.getElementById('band-setup-error');
+  errEl.style.display = 'none';
+  if (!name) { errEl.textContent = 'Please enter a band name.'; errEl.style.display = 'block'; return; }
+  const btn = document.getElementById('create-band-btn');
+  btn.disabled = true; btn.textContent = 'Creating…';
+  try {
+    const res = await apiFetch('/api/band', { method: 'POST', body: JSON.stringify({ name }) });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Failed to create band');
+    _bandData = await apiFetch('/api/band').then(r => r.json());
+    document.getElementById('band-name-display').textContent = _bandData.name;
+    setBandChrome(true);
+    document.getElementById('band-setup-overlay').style.display = 'none';
+    loadAppData();
+    startNotifPolling();
+  } catch (err) {
+    errEl.textContent = err.message; errEl.style.display = 'block';
+    btn.disabled = false; btn.textContent = 'Create Band';
+  }
+});
+
+document.getElementById('join-band-btn').addEventListener('click', async () => {
+  const token = document.getElementById('join-token-input').value.trim();
+  const errEl = document.getElementById('band-setup-error');
+  errEl.style.display = 'none';
+  if (!token) { errEl.textContent = 'Please paste your invite token.'; errEl.style.display = 'block'; return; }
+  const btn = document.getElementById('join-band-btn');
+  btn.disabled = true; btn.textContent = 'Joining…';
+  try {
+    const res = await apiFetch('/api/band/join', { method: 'POST', body: JSON.stringify({ invite_token: token }) });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Failed to join band');
+    _bandData = await apiFetch('/api/band').then(r => r.json());
+    document.getElementById('band-name-display').textContent = _bandData.name;
+    setBandChrome(true);
+    document.getElementById('band-setup-overlay').style.display = 'none';
+    loadAppData();
+    startNotifPolling();
+  } catch (err) {
+    errEl.textContent = err.message; errEl.style.display = 'block';
+    btn.disabled = false; btn.textContent = 'Join Band';
+  }
+});
+
+// ── App Menu (☰ dropdown) ───────────────────────────────────────────────────────
+
+// Two header dropdowns: left band menu (☰) and right account menu (avatar).
+// Opening one closes the other.
+function toggleBandMenu(e) {
+  if (e) e.stopPropagation();
+  const band = document.getElementById('band-menu');
+  const open = band.style.display === 'block';
+  closeAllMenus();
+  band.style.display = open ? 'none' : 'block';
+}
+function toggleUserMenu(e) {
+  if (e) e.stopPropagation();
+  const user = document.getElementById('user-menu');
+  const open = user.style.display === 'block';
+  closeAllMenus();
+  user.style.display = open ? 'none' : 'block';
+}
+function closeAllMenus() {
+  const band = document.getElementById('band-menu');
+  const user = document.getElementById('user-menu');
+  if (band) band.style.display = 'none';
+  if (user) user.style.display = 'none';
+}
+// Backwards-compat alias (some call sites use the old name)
+function closeAppMenu() { closeAllMenus(); }
+
+function updateMenuIdentity() {
+  const name = _userProfile?.display_name || _userEmail || '';
+  const nameEl = document.getElementById('menu-identity-name');
+  const emailEl = document.getElementById('menu-identity-email');
+  if (nameEl) nameEl.textContent = name;
+  if (emailEl) emailEl.textContent = (_userProfile?.display_name ? _userEmail : '');
+
+  // Avatar: first initial in a solid colored circle (color stable per user)
+  const avatarEl = document.getElementById('user-avatar-initial');
+  const avatarBtn = document.getElementById('user-avatar-btn');
+  if (avatarEl && avatarBtn) {
+    const source = (_userProfile?.display_name || _userEmail || '').trim();
+    avatarEl.textContent = source ? source[0].toUpperCase() : '?';
+    avatarBtn.style.background = avatarColorFor(_userEmail || source);
+  }
+}
+
+// Deterministic palette pick so a given user always gets the same avatar color.
+function avatarColorFor(seed) {
+  const PALETTE = ['--avatar-0','--avatar-1','--avatar-2','--avatar-3','--avatar-4','--avatar-5'];
+  let hash = 0;
+  for (let i = 0; i < (seed || '').length; i++) hash = (hash * 31 + seed.charCodeAt(i)) >>> 0;
+  return `var(${PALETTE[hash % PALETTE.length]})`;
+}
+
+// Close menus on outside-click or Escape
+document.addEventListener('click', (e) => {
+  if (e.target.closest('#band-menu, #band-menu-btn, #user-menu, #user-avatar-btn')) return;
+  closeAllMenus();
+});
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeAllMenus(); });
+
+// ── Band Settings Modal ──────────────────────────────────────────────────────────
+
+function openBandSettingsModal() {
+  if (!_bandData) return;
+  const isAdmin = _bandData.role === 'admin';
+
+  document.getElementById('band-name-edit').value = _bandData.name || '';
+  renderBandMembers();
+
+  const inviteUrl = `${location.origin}${location.pathname}?join=${_bandData.invite_token}`;
+  document.getElementById('invite-link-display').value = inviteUrl;
+
+  const factor = Number(_bandData.approval_factor ?? 3.5);
+  document.getElementById('approval-factor-slider').value = factor;
+  document.getElementById('approval-factor-value').textContent = factor;
+  updateApprovalHelp(factor);
+
+  document.getElementById('band-danger-zone').style.display = isAdmin ? 'block' : 'none';
+  document.getElementById('band-leave-error').style.display = 'none';
+  document.getElementById('band-info-modal').style.display = 'flex';
+}
+
+function renderBandMembers() {
+  const members = _bandData.members || [];
+  const isAdmin = _bandData.role === 'admin';
+  document.getElementById('band-members-header').textContent = `Members (${members.length}/4)`;
+  const membersEl = document.getElementById('band-info-members');
+  membersEl.innerHTML = '';
+
+  members.forEach(m => {
+    const isSelf = m.user_id === _currentUserId;
+    const row = document.createElement('div');
+    row.style.cssText = 'display:flex; align-items:center; gap:10px; padding:8px 0; border-bottom:1px solid var(--border);';
+
+    const initials = document.createElement('div');
+    initials.style.cssText = 'width:30px; height:30px; border-radius:50%; background:var(--accent-dim); color:#fff; display:flex; align-items:center; justify-content:center; font-size:12px; font-weight:700; flex-shrink:0;';
+    initials.textContent = (m.name || m.email || '?')[0].toUpperCase();
+
+    const info = document.createElement('div');
+    info.style.cssText = 'flex:1; min-width:0;';
+    const rolesTags = (m.roles || []).map(r =>
+      `<span class="tag-pill" style="margin-right:4px;">${escapeHtml(r)}</span>`).join('');
+    info.innerHTML =
+      `<div style="font-size:13px; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${escapeHtml(m.name || '')}${isSelf ? ' <span style="color:var(--text-dim); font-weight:400;">(you)</span>' : ''}</div>` +
+      `<div style="font-size:11px; color:var(--text-dim); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${escapeHtml(m.email || '')}</div>` +
+      (rolesTags ? `<div style="margin-top:3px;">${rolesTags}</div>` : '');
+
+    const right = document.createElement('div');
+    right.style.cssText = 'display:flex; align-items:center; gap:6px; flex-shrink:0;';
+    const roleBadge = document.createElement('span');
+    roleBadge.style.cssText = 'font-size:10px; padding:2px 6px; border-radius:9px; background:var(--border); color:var(--text-dim);';
+    roleBadge.textContent = m.role;
+    right.appendChild(roleBadge);
+
+    // Admin controls on other members
+    if (isAdmin && !isSelf) {
+      if (m.role !== 'admin') {
+        const promote = document.createElement('button');
+        promote.className = 'settings-btn ghost';
+        promote.style.cssText += 'padding:3px 8px; font-size:11px;';
+        promote.textContent = 'Make admin';
+        promote.onclick = () => promoteMember(m.user_id);
+        right.appendChild(promote);
+      }
+      const remove = document.createElement('button');
+      remove.className = 'settings-btn ghost';
+      remove.style.cssText += 'padding:3px 8px; font-size:11px; color:var(--red);';
+      remove.textContent = 'Remove';
+      remove.onclick = () => removeMember(m.user_id, m.name || m.email);
+      right.appendChild(remove);
+    }
+
+    row.append(initials, info, right);
+    membersEl.appendChild(row);
+  });
+}
+
+async function saveBandName() {
+  const name = document.getElementById('band-name-edit').value.trim();
+  if (!name) { showToast('Band name is required'); return; }
+  const btn = document.getElementById('band-name-save');
+  btn.disabled = true;
+  try {
+    const res = await apiFetch('/api/band', { method: 'PATCH', body: JSON.stringify({ name }) });
+    if (!res.ok) throw new Error((await res.json()).error || 'Failed');
+    _bandData = await res.json();
+    document.getElementById('band-name-display').textContent = _bandData.name;
+    showToast('✓ Band name updated');
+  } catch (err) {
+    showToast(err.message || 'Failed to rename band');
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+function onApprovalFactorInput() {
+  const v = Number(document.getElementById('approval-factor-slider').value);
+  document.getElementById('approval-factor-value').textContent = v;
+  updateApprovalHelp(v);
+}
+function updateApprovalHelp(factor) {
+  const size = _bandData?.members?.length || 1;
+  const threshold = Math.ceil(size * factor);
+  document.getElementById('approval-factor-help').textContent =
+    `Songs need an average rating of ${factor}/5 — that's ${threshold} of ${size * 5} points to approve.`;
+}
+async function saveApprovalFactor() {
+  const factor = Number(document.getElementById('approval-factor-slider').value);
+  try {
+    const res = await apiFetch('/api/band', { method: 'PATCH', body: JSON.stringify({ approval_factor: factor }) });
+    if (!res.ok) throw new Error((await res.json()).error || 'Failed');
+    _bandData = await res.json();
+    showToast('✓ Voting threshold updated');
+  } catch (err) {
+    showToast(err.message || 'Failed to update threshold');
+  }
+}
+
+async function regenerateInvite() {
+  if (!confirm('Regenerate the invite link? The old link will stop working.')) return;
+  try {
+    const res = await apiFetch('/api/band/invite/regenerate', { method: 'POST' });
+    if (!res.ok) throw new Error((await res.json()).error || 'Failed');
+    const data = await res.json();
+    _bandData.invite_token = data.invite_token;
+    document.getElementById('invite-link-display').value =
+      `${location.origin}${location.pathname}?join=${data.invite_token}`;
+    showToast('✓ New invite link generated');
+  } catch (err) {
+    showToast(err.message || 'Failed to regenerate link');
+  }
+}
+
+async function promoteMember(userId) {
+  try {
+    const res = await apiFetch(`/api/band/members/${userId}`, { method: 'PATCH' });
+    if (!res.ok) throw new Error((await res.json()).error || 'Failed');
+    _bandData = await res.json();
+    renderBandMembers();
+    showToast('✓ Member promoted to admin');
+  } catch (err) {
+    showToast(err.message || 'Failed to promote member');
+  }
+}
+
+async function removeMember(userId, label) {
+  if (!confirm(`Remove ${label} from the band?`)) return;
+  try {
+    const res = await apiFetch(`/api/band/members/${userId}`, { method: 'DELETE' });
+    if (!res.ok) throw new Error((await res.json()).error || 'Failed');
+    _bandData = await res.json();
+    renderBandMembers();
+    showToast('✓ Member removed');
+  } catch (err) {
+    showToast(err.message || 'Failed to remove member');
+  }
+}
+
+async function leaveBand() {
+  if (!confirm('Leave this band? You can rejoin later with an invite link.')) return;
+  const errEl = document.getElementById('band-leave-error');
+  errEl.style.display = 'none';
+  try {
+    const res = await apiFetch('/api/band/leave', { method: 'POST' });
+    if (!res.ok) {
+      const msg = (await res.json()).error || 'Failed to leave band';
+      errEl.textContent = msg; errEl.style.display = 'block';
+      document.getElementById('band-info-modal').style.display = 'flex';
+      return;
+    }
+    document.getElementById('band-info-modal').style.display = 'none';
+    resetToBandSetup();
+  } catch (err) {
+    errEl.textContent = 'Failed to leave band'; errEl.style.display = 'block';
+  }
+}
+
+async function deleteBand() {
+  if (!confirm('Delete this band permanently? This cannot be undone.')) return;
+  try {
+    const res = await apiFetch('/api/band', { method: 'DELETE' });
+    if (!res.ok) throw new Error((await res.json()).error || 'Failed');
+    document.getElementById('band-info-modal').style.display = 'none';
+    resetToBandSetup();
+  } catch (err) {
+    showToast(err.message || 'Failed to delete band');
+  }
+}
+
+function resetToBandSetup() {
+  _bandData = null;
+  clearInterval(_notifPollTimer);
+  _notifPollTimer = null;
+  libraryData = [];
+  setListIds = [];
+  renderLibrary();
+  renderSetList();
+  setBandChrome(false);
+  document.getElementById('band-setup-overlay').style.display = 'flex';
+}
+
+// ── My Settings Modal ────────────────────────────────────────────────────────────
+
+function openUserSettingsModal() {
+  const p = _userProfile || { display_name: null, roles: [], notif_prefs: {} };
+  document.getElementById('profile-display-name').value = p.display_name || '';
+  renderProfileRoles(p.roles || []);
+  renderSettingsTunings();
+  const np = p.notif_prefs || {};
+  document.getElementById('notif-new_proposal').checked    = np.new_proposal    !== false;
+  document.getElementById('notif-proposal_failed').checked = np.proposal_failed !== false;
+  document.getElementById('notif-song_archived').checked   = np.song_archived   !== false;
+  document.getElementById('user-settings-modal').style.display = 'flex';
+}
+
+let _profileRoles = [];
+function renderProfileRoles(selected) {
+  _profileRoles = [...selected];
+  const wrap = document.getElementById('profile-roles');
+  wrap.innerHTML = '';
+  // Default options plus any custom roles the user already has
+  const all = [...ROLE_OPTIONS];
+  _profileRoles.forEach(r => { if (!all.includes(r)) all.push(r); });
+  all.forEach(role => {
+    const chip = document.createElement('span');
+    chip.className = 'role-chip' + (_profileRoles.includes(role) ? ' selected' : '');
+    chip.textContent = role;
+    chip.onclick = () => toggleRole(role);
+    wrap.appendChild(chip);
+  });
+}
+function toggleRole(role) {
+  if (_profileRoles.includes(role)) _profileRoles = _profileRoles.filter(r => r !== role);
+  else _profileRoles.push(role);
+  renderProfileRoles(_profileRoles);
+}
+function addCustomRole() {
+  const input = document.getElementById('profile-role-add');
+  const role = input.value.trim();
+  if (!role) return;
+  if (!_profileRoles.includes(role)) _profileRoles.push(role);
+  input.value = '';
+  renderProfileRoles(_profileRoles);
+}
+
+async function saveProfile() {
+  const display_name = document.getElementById('profile-display-name').value.trim();
+  const btn = document.getElementById('profile-save');
+  btn.disabled = true;
+  try {
+    const res = await apiFetch('/api/profile', {
+      method: 'PUT',
+      body: JSON.stringify({ display_name, roles: _profileRoles }),
+    });
+    if (!res.ok) throw new Error('Failed');
+    _userProfile = await res.json();
+    updateMenuIdentity();
+    showToast('✓ Profile saved');
+    // Refresh band + songs so the new display name shows on members and song authors
+    try {
+      const bres = await apiFetch('/api/band');
+      if (bres.ok) _bandData = await bres.json();
+    } catch {}
+    const sres = await apiFetch('/api/songs');
+    if (sres.ok) { libraryData = await sres.json(); renderLibrary(); }
+  } catch (err) {
+    showToast('Failed to save profile');
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+function renderSettingsTunings() {
+  const wrap = document.getElementById('settings-tunings-list');
+  wrap.innerHTML = '';
+  (allTuningValues || []).forEach(t => {
+    const pill = document.createElement('span');
+    pill.style.cssText = 'font-size:12px; padding:5px 12px; border-radius:16px; border:1px solid var(--border); background:var(--bg); color:var(--text);';
+    pill.textContent = t;
+    wrap.appendChild(pill);
+  });
+}
+async function addTuningFromSettings() {
+  const input = document.getElementById('settings-tuning-add');
+  const tuning = input.value.trim();
+  if (!tuning) return;
+  if (allTuningValues.includes(tuning)) { input.value = ''; return; }
+  try {
+    const res = await apiFetch('/api/tunings', { method: 'POST', body: JSON.stringify({ tuning }) });
+    if (!res.ok) throw new Error('Failed');
+    allTuningValues.push(tuning);
+    input.value = '';
+    renderSettingsTunings();
+    renderLibrary();
+    showToast('✓ Tuning added');
+  } catch (err) {
+    showToast('Failed to add tuning');
+  }
+}
+
+async function saveNotifPrefs() {
+  const prefs = {
+    new_proposal:    document.getElementById('notif-new_proposal').checked,
+    proposal_failed: document.getElementById('notif-proposal_failed').checked,
+    song_archived:   document.getElementById('notif-song_archived').checked,
+  };
+  try {
+    const res = await apiFetch('/api/profile/notifications', { method: 'PUT', body: JSON.stringify(prefs) });
+    if (!res.ok) throw new Error('Failed');
+    if (_userProfile) _userProfile.notif_prefs = await res.json();
+    showToast('✓ Notification preferences saved');
+  } catch (err) {
+    showToast('Failed to save preferences');
+  }
+}
+
+function escapeHtml(s) {
+  return String(s == null ? '' : s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+function copyInviteLink() {
+  const input = document.getElementById('invite-link-display');
+  navigator.clipboard.writeText(input.value).then(() => {
+    const btn = document.getElementById('copy-invite-btn');
+    btn.textContent = 'Copied!';
+    setTimeout(() => { btn.textContent = 'Copy'; }, 2000);
+  }).catch(() => { input.select(); document.execCommand('copy'); });
+}
+
+// ── Notification Polling ───────────────────────────────────────────────────────
+
+function startNotifPolling() {
+  if (_notifPollTimer) clearInterval(_notifPollTimer);
+  pollNotifications();
+  _notifPollTimer = setInterval(pollNotifications, 60000);
+}
+
+function countUnvotedProposals() {
+  if (!_bandData) return 0;
+  return libraryData.filter(s =>
+    s.extra?.proposalId &&
+    (s.extra?.proposalStatus === 'pending' || s.extra?.proposalStatus === 'approved') &&
+    !s.extra?.userVote &&
+    s.extra?.proposedBy !== _currentUserId
+  ).length;
+}
+
+async function pollNotifications() {
+  if (!_bandData) return;
+  try {
+    const res = await apiFetch('/api/songs');
+    if (res.ok) {
+      libraryData = await res.json();
+      renderLibrary();
+    }
+  } catch {}
+  updateNotifBadge(countUnvotedProposals());
+}
+
+function updateNotifBadge(count) {
+  const badge = document.getElementById('notif-badge');
+  if (count > 0) {
+    badge.textContent = count;
+    badge.style.display = 'inline-block';
+  } else {
+    badge.style.display = 'none';
+  }
+}
+
+// ── Voting Modal ───────────────────────────────────────────────────────────────
+
+async function openVotingModal() {
+  if (!_bandData) return;
+  document.getElementById('voting-modal').style.display = 'flex';
+  document.getElementById('voting-song-card').style.display = 'block';
+  document.getElementById('voting-buttons').style.display = 'flex';
+  document.getElementById('voting-empty').style.display = 'none';
+
+  try {
+    const res = await apiFetch('/api/band/proposals');
+    if (!res.ok) return;
+    _votingProposals = await res.json();
+    _votingIndex = 0;
+    renderVotingCard();
+  } catch (err) {
+    showToast('Failed to load proposals');
+  }
+}
+
+function renderVotingCard() {
+  const cardEl    = document.getElementById('voting-song-card');
+  const btnsEl    = document.getElementById('voting-buttons');
+  const progressEl = document.getElementById('voting-progress');
+  const emptyEl   = document.getElementById('voting-empty');
+
+  if (!_votingProposals.length) {
+    cardEl.style.display  = 'none';
+    btnsEl.style.display  = 'none';
+    emptyEl.style.display = 'block';
+    progressEl.textContent = '';
+    updateNotifBadge(0);
+    return;
+  }
+
+  cardEl.style.display  = 'block';
+  btnsEl.style.display  = 'flex';
+  emptyEl.style.display = 'none';
+
+  const remaining = _votingProposals.length;
+  progressEl.textContent = `${remaining} song${remaining !== 1 ? 's' : ''} waiting for your vote`;
+
+  const p = _votingProposals[_votingIndex];
+  const song = p.song;
+
+  cardEl.innerHTML = '';
+  const topRow = document.createElement('div');
+  topRow.style.cssText = 'display:flex; gap:12px; align-items:flex-start; margin-bottom:12px;';
+
+  const art = document.createElement('div');
+  art.style.cssText = 'width:56px; height:56px; border-radius:6px; overflow:hidden; background:var(--border); flex-shrink:0; display:flex; align-items:center; justify-content:center; font-size:24px; color:var(--text-dim);';
+  if (song.album_art) {
+    const img = document.createElement('img');
+    img.src = song.album_art; img.style.cssText = 'width:100%; height:100%; object-fit:cover;';
+    art.appendChild(img);
+  } else { art.textContent = '♪'; }
+
+  const meta = document.createElement('div');
+  meta.style.cssText = 'flex:1; min-width:0;';
+  meta.innerHTML = `
+    <div style="font-size:16px; font-weight:700; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; margin-bottom:2px;">${song.name}</div>
+    <div style="font-size:13px; color:var(--text-dim); margin-bottom:4px;">${song.artist || '—'}</div>
+    <div style="font-size:12px; color:var(--text-dim);">${song.duration_raw || ''} · Proposed by <strong style="color:var(--text);">${p.proposer_name}</strong></div>
+  `;
+  if (song.spotify_url) {
+    const spotifyLink = document.createElement('a');
+    spotifyLink.href = song.spotify_url;
+    spotifyLink.target = '_blank';
+    spotifyLink.rel = 'noopener noreferrer';
+    spotifyLink.textContent = '▶ Preview on Spotify';
+    spotifyLink.style.cssText = 'font-size:11px; color:var(--text-dim); text-decoration:none; display:inline-block; margin-top:4px;';
+    spotifyLink.addEventListener('mouseover', () => { spotifyLink.style.color = 'var(--accent)'; });
+    spotifyLink.addEventListener('mouseout',  () => { spotifyLink.style.color = 'var(--text-dim)'; });
+    meta.appendChild(spotifyLink);
+  }
+  topRow.append(art, meta);
+  cardEl.appendChild(topRow);
+
+  // Show votes from others (Likert chip colours)
+  if (p.votes && p.votes.length > 0) {
+    const votesLabel = document.createElement('p');
+    votesLabel.style.cssText = 'font-size:11px; color:var(--text-dim); margin-bottom:6px;';
+    votesLabel.textContent = 'Votes so far:';
+    cardEl.appendChild(votesLabel);
+    const votesRow = document.createElement('div');
+    votesRow.style.cssText = 'display:flex; gap:6px; flex-wrap:wrap; margin-bottom:8px;';
+    p.votes.forEach(v => {
+      const chip = document.createElement('span');
+      chip.style.cssText = `font-size:11px; padding:2px 8px; border-radius:9px; background:${LIKERT_CHIP_COLOR[v.vote] || 'var(--border)'}; border:1px solid ${LIKERT_CHIP_BORDER[v.vote] || 'var(--border)'}; display:inline-flex; align-items:center; gap:4px; cursor:default;`;
+      chip.innerHTML = `${LIKERT_EMOJI[v.vote] || ''} <span style="color:var(--text-dim);">${v.name}</span>`;
+      votesRow.appendChild(chip);
+    });
+    cardEl.appendChild(votesRow);
+  }
+
+  // Score
+  const bandSize = _bandData?.members?.length || (p.votes?.length + 1) || 4;
+  const threshold = Math.ceil(bandSize * 3.5);
+  const scoreEl = document.createElement('p');
+  scoreEl.style.cssText = 'font-size:11px; color:var(--text-dim); margin-top:4px; margin-bottom:0;';
+  scoreEl.textContent = `Score: ${p.score}/${bandSize * 5} · need ${threshold} to approve`;
+  cardEl.appendChild(scoreEl);
+
+  // Vote buttons (Likert 1–5)
+  btnsEl.innerHTML = '';
+  btnsEl.style.flexDirection = 'column';
+  const btnRow = document.createElement('div');
+  btnRow.style.cssText = 'display:flex; gap:8px; justify-content:center;';
+
+  const modalBtnBg = { '5':'var(--green)', '4':'#2e9e7a', '3':'#6b6b80', '2':'#c07820', '1':'var(--red)' };
+  LIKERT_VOTES.forEach(lv => {
+    const btn = document.createElement('button');
+    btn.textContent = `${lv.emoji} ${lv.label}`;
+    btn.title = lv.tip;
+    btn.style.cssText = `flex:1; background:${modalBtnBg[lv.v]}; color:#fff; border:none; border-radius:8px; padding:12px 4px; font-size:13px; font-weight:700; cursor:pointer; transition:opacity .15s;`;
+    btn.addEventListener('click', () => {
+      submitVote(p.id, lv.v);
+    });
+    btnRow.appendChild(btn);
+  });
+
+  btnsEl.append(btnRow);
+}
+
+async function submitVote(proposalId, vote) {
+  const btnsEl = document.getElementById('voting-buttons');
+  btnsEl.querySelectorAll('button').forEach(b => { b.disabled = true; b.style.opacity = '0.6'; });
+
+  try {
+    const res = await apiFetch('/api/band/vote', {
+      method: 'POST',
+      body: JSON.stringify({ proposal_id: proposalId, vote }),
+    });
+    if (!res.ok) { showToast('Failed to submit vote'); return; }
+    const result = await res.json();
+
+    // Remove this proposal from the voting modal queue
+    _votingProposals.splice(_votingIndex, 1);
+
+    // Always reload library so statuses and scores reflect the new vote
+    const songsRes = await apiFetch('/api/songs');
+    if (songsRes.ok) {
+      libraryData = await songsRes.json();
+      const setlistRes = await apiFetch('/api/setlist');
+      if (setlistRes.ok) setListIds = await setlistRes.json();
+      renderLibrary();
+      renderSetList();
+    }
+
+    renderVotingCard();
+    updateNotifBadge(countUnvotedProposals());
+  } catch {
+    showToast('Failed to submit vote');
+  }
+}
+
+document.getElementById('voting-modal-close').addEventListener('click', () => {
+  document.getElementById('voting-modal').style.display = 'none';
+});
 
 
 </script>
