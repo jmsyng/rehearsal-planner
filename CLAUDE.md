@@ -1,5 +1,10 @@
 # Rehearsal Planner — Project Guide for Claude
 
+> **Starting a new session? Read this file top-to-bottom before touching anything else.**
+> The stack, file layout, auth flow, gotchas, and recent session notes below will answer
+> most questions before you ask them. Skipping this step is what causes false assumptions
+> about project structure (e.g. guessing this is a React/TypeScript app — it is not).
+
 A band rehearsal planner: per-user song library + ordered set list, with Spotify search, album art lookup, and a time-budget bar (warn at 2h, max 2h30).
 
 ## Stack
@@ -121,6 +126,11 @@ tail -f /tmp/rehearsal-planner.log
   reconnects or the session cycles — that was the recurring "localhost is down again."
   Use `preview_start` only for throwaway screenshot/eval checks; for a server you rely on,
   use the launchd agent (or `( nohup python3 app.py >/tmp/rp.log 2>&1 & )` for a quick detach).
+- **launchd owns 5050; the preview server runs on 5051 (they coexist).** `app.py`'s port is
+  configurable — `python3 app.py [port]` (CLI arg) or `$PORT`, **defaulting to 5050** so the
+  plist and a plain `python3 app.py` are unchanged. `.claude/launch.json` passes `5051`, so
+  `preview_start` binds 5051 and never collides with the launchd server on 5050. If you ever
+  want `preview_start` to own 5050 instead, `launchctl bootout` the agent first to free the port.
 - **`RP_SERVICE=1`** (set in the plist) makes `app.py` run with `use_reloader=False` — one
   process for launchd to supervise cleanly. Plain `python3 app.py` is unchanged (reloader on).
   Because the service has no reloader, **restart it after editing a `.py`** (`kickstart -k`);
