@@ -151,6 +151,8 @@ Env vars on Vercel are set via the dashboard (Project → Settings → Environme
 ## Gotchas / Lessons Learned
 
 - **"localhost keeps going down" = it was started via the Claude Preview MCP (`preview_start`).** Those servers are children of the preview MCP and die when it reconnects / the session cycles. Run the persistent server via the launchd agent instead (see Local Development → Keeping localhost up).
+- **A `transform` transition on a draggable element makes it lag behind the finger on touch.** SortableJS drags the touch fallback clone by updating its `transform` every move; if the element has `transition: transform …`, each update animates → "molasses" drag on mobile. Fix: `transition: none` on `.song-card.sortable-drag, .song-card.sortable-fallback`. Keep transitions off anything Sortable repositions live.
+- **Neon Auth Trusted Origins must be exact URLs — no wildcards** (the UI rejects `https://*.…` as an invalid URL). Only the production origin (`https://rehearsal-planner.vercel.app`) is trusted, so **sign-in fails with "Invalid origin" on Vercel preview deploys.** To test signed-in features on a preview, add that preview's exact branch-alias origin (e.g. `https://rehearsal-planner-git-<branch>-…-jmsyngs-projects.vercel.app`) to Trusted Origins, then remove it after the branch is merged/deleted.
 - **Don't use `psycopg2.pool.ThreadedConnectionPool`** — it breaks under Flask debug-mode threading with `PoolError: trying to put unkeyed connection`. `db.py` deliberately opens/closes a fresh connection per request. Neon is serverless; pooling on the client adds nothing.
 - **JWT audience/issuer is the origin, not the full base URL.** `aud=https://ep-xxx.neonauth.c-8.us-east-1.aws.neon.tech` (no `/neondb/auth` suffix).
 - **EdDSA, not RS256.** Better Auth signs with Ed25519 by default. `auth.py` accepts `["EdDSA", "RS256"]` for safety.
@@ -502,6 +504,15 @@ Rebuilt the app header to mirror the Reddit mobile layout, plus search consolida
 **Verification** (Claude Preview, localhost:5050, real sign-in as `devtest_signin@example.com` then **mock band/song state injected** because that account has no band — bare-name assignment, e.g. `_bandData = {...}`, not `window._bandData`, since the app's state vars are top-level `let` bindings): confirmed desktop (1280px) + mobile (375px) layout, add-button collapses to `＋` icon ≤800px, global search filters both panels with `N of M` counts, Spotify fallback opens the modal prefilled (10 results), both menus toggle/mutual-exclude/outside-click/Escape, avatar initial + stable color, Band/My Settings modals open, no console errors. **Note:** `preview_click` on the dynamically-rendered fallback button didn't fire the handler (synthetic-event/scroll quirk); `.click()` and a direct call both worked — not a code bug.
 
 **State at session end:** Local only (not committed, not deployed). Stacked on all the earlier uncommitted work (band backend, card redesign, Likert voting, settings UX, dev sign-in).
+
+### Session: Ship the backlog + mobile drag fix (2026-05-30)
+
+Committed and deployed the long-stacked uncommitted work, then ran a first full branch→PR→preview→merge cycle for a bug fix.
+
+- **Committed the whole backlog** in 3 layer commits (backend / frontend `templates/index.html` / docs) on a branch, merged to `main`, pushed → Vercel auto-deployed. **Ran `init_db.py` against prod first** so the band-aware routes (`get_user_band` on `/api/songs`, `/api/setlist`) didn't 500 on a missing schema. Verified via Vercel runtime logs (all DB-backed routes 200).
+- **Mobile Set List drag fix** (`fix-mobile-setlist-drag-lag`, merged PR #1): removed the `transform` transition from the dragged element — see the SortableJS gotcha above. Verified the *feel* on a real phone via the Vercel **preview deploy** before merging.
+- **Process notes for future changes:** real changes go through a branch → push (auto preview) → test the preview → PR → merge (= prod deploy) → delete branch. Docs-only edits like this one can go straight to `main` (no runtime risk). Testing signed-in features on a preview requires adding that preview's origin to Neon Trusted Origins (see gotcha).
+- **launchd service note:** local server now runs as `~/Library/LaunchAgents/com.rehearsal-planner.dev.plist` (not committed; machine-specific). See Local Development.
 
 ## Maintenance Pattern for This File
 
