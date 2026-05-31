@@ -424,12 +424,13 @@
     .panel:last-child { border-right: none; }
 
     .panel-header {
-      padding: 14px 20px;
+      padding: 10px 16px;
       background: var(--surface);
       border-bottom: 1px solid var(--border);
       display: flex;
       align-items: center;
-      justify-content: space-between;
+      gap: 8px;
+      flex-wrap: wrap;
       flex-shrink: 0;
     }
 
@@ -441,6 +442,8 @@
       color: var(--text-dim);
     }
 
+    .panel-header .spacer { flex: 1; }
+
     .panel-header .count {
       font-size: 12px;
       color: var(--text-dim);
@@ -448,6 +451,48 @@
       border: 1px solid var(--border);
       border-radius: 20px;
       padding: 2px 10px;
+      white-space: nowrap;
+    }
+
+    /* Compact filter/group controls — mirror the header search bar styling */
+    .panel-tools {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+
+    .toolbar-select,
+    .toolbar-toggle {
+      font-family: inherit;
+      font-size: 12px;
+      color: var(--text);
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 4px 8px;
+      cursor: pointer;
+      transition: border-color 0.15s, color 0.15s, background 0.15s;
+    }
+
+    .toolbar-select { max-width: 150px; }
+
+    .toolbar-select:hover,
+    .toolbar-toggle:hover { border-color: var(--accent); }
+
+    .toolbar-select:focus,
+    .toolbar-toggle:focus-visible { outline: none; border-color: var(--accent); }
+
+    /* Active = a non-default filter / grouping is applied */
+    .toolbar-select.active {
+      color: var(--accent);
+      border-color: var(--accent);
+    }
+
+    .toolbar-toggle[aria-pressed="true"] {
+      color: var(--accent);
+      border-color: var(--accent);
+      background: rgba(124,106,247,0.12);
     }
 
     .song-list {
@@ -1483,6 +1528,19 @@
       border-color: var(--setlist-accent-dim);
     }
 
+    /* Toolbar controls adopt the panel theme on hover/active */
+    #library-panel .toolbar-select:hover,
+    #library-panel .toolbar-toggle:hover,
+    #library-panel .toolbar-select:focus,
+    #library-panel .toolbar-toggle:focus-visible { border-color: var(--library-accent); }
+    #library-panel .toolbar-select.active { color: var(--library-accent); border-color: var(--library-accent); }
+    #library-panel .toolbar-toggle[aria-pressed="true"] {
+      color: var(--library-accent); border-color: var(--library-accent); background: var(--library-tint);
+    }
+    #setlist-panel .toolbar-select:hover,
+    #setlist-panel .toolbar-select:focus { border-color: var(--setlist-accent); }
+    #setlist-panel .toolbar-select.active { color: var(--setlist-accent); border-color: var(--setlist-accent); }
+
     /* Song cards: left-edge accent stripe (graphical cue, visible even in grayscale) */
     #library-panel .song-card {
       border-left: 3px solid var(--library-accent-dim);
@@ -1522,6 +1580,9 @@
       .mobile-tab[data-panel="setlist-panel"].active {
         color: var(--setlist-accent);
       }
+
+      /* Tab already names the panel — drop the duplicate header title on mobile */
+      .panel-header h2 { display: none; }
     }
   </style>
 </head>
@@ -1898,6 +1959,16 @@
   <div class="panel" id="library-panel">
     <div class="panel-header">
       <h2>Song Library</h2>
+      <div class="panel-tools">
+        <select class="toolbar-select" id="lib-filter-tuning" title="Filter by tuning" aria-label="Filter by tuning">
+          <option value="">All tunings</option>
+        </select>
+        <select class="toolbar-select" id="lib-filter-status" title="Filter by status" aria-label="Filter by status">
+          <option value="">All statuses</option>
+        </select>
+        <button type="button" class="toolbar-toggle" id="lib-show-archived" title="Show archived songs" aria-pressed="false">Archived</button>
+      </div>
+      <span class="spacer"></span>
       <span class="count" id="library-count">0 songs</span>
     </div>
     <div class="song-list" id="library-list">
@@ -1913,6 +1984,13 @@
   <div class="panel" id="setlist-panel">
     <div class="panel-header">
       <h2>Set List</h2>
+      <div class="panel-tools">
+        <select class="toolbar-select" id="set-group-by" title="Group set list" aria-label="Group set list">
+          <option value="">No grouping</option>
+          <option value="tuning">Group by tuning</option>
+        </select>
+      </div>
+      <span class="spacer"></span>
       <span class="count" id="setlist-count">0 songs</span>
     </div>
     <div class="song-list" id="setlist-list">
@@ -1960,6 +2038,22 @@ let librarySearchText = '';  // tracks search text in library
 let setListSearchText = '';  // tracks search text in set list
 let expandedSongId = null;  // tracks which song card is currently expanded
 let allTuningValues = ['E standard', 'Eb', 'Drop D', 'Drop C#'];  // available tuning values across app
+
+// Library toolbar filters + set-list grouping
+let libraryTuningFilter = '';   // '' = all tunings
+let libraryStatusFilter = '';   // '' = all statuses
+let libraryShowArchived = false;// when false, Archived songs are hidden
+const STATUS_ORDER = ['Active', 'Learning', 'Proposed', 'Resting', 'Shelved', 'Archived'];
+
+// Effective status used by the badge + the Library status filter
+function effectiveStatus(song) {
+  if (song.extra?.Status === 'Archived') return 'Archived';
+  const ps = song.extra?.proposalStatus;
+  if (ps === 'pending')  return 'Proposed';
+  if (ps === 'approved') return 'Learning';
+  if (ps === 'rejected') return 'Resting';
+  return song.extra?.songStatus || song.extra?.Status || '';
+}
 
 let _bandData = null;       // {id, name, invite_token, role, members:[...]}
 let _userProfile = null;    // {display_name, roles:[...], notif_prefs:{...}}
@@ -2795,9 +2889,27 @@ function renderLibrary() {
 
   let filteredData = libraryData;
 
-  // Exclude songs already in the set list and archived songs
-  filteredData = filteredData.filter(s => !setListIds.includes(s.id) && s.extra?.Status !== 'Archived');
-  const totalCount = filteredData.length;  // Count before search filter
+  // Exclude songs already in the set list; hide Archived unless the toggle is on
+  filteredData = filteredData.filter(s =>
+    !setListIds.includes(s.id) &&
+    (libraryShowArchived || s.extra?.Status !== 'Archived')
+  );
+  const totalCount = filteredData.length;  // Count before narrowing filters
+
+  // Keep the toolbar dropdown options in sync with what's in the library
+  populateLibraryFilters();
+
+  // Tuning filter
+  if (libraryTuningFilter) {
+    filteredData = filteredData.filter(s =>
+      (s.extra?.OurTuning || s.extra?.Tuning || '') === libraryTuningFilter
+    );
+  }
+
+  // Status filter
+  if (libraryStatusFilter) {
+    filteredData = filteredData.filter(s => effectiveStatus(s) === libraryStatusFilter);
+  }
 
   if (librarySearchText) {
     filteredData = filteredData.filter(s =>
@@ -2805,6 +2917,8 @@ function renderLibrary() {
       s.extra?.Artist?.toLowerCase().includes(librarySearchText.toLowerCase())
     );
   }
+
+  const isNarrowed = !!(librarySearchText || libraryTuningFilter || libraryStatusFilter);
 
   // Sort: pending proposals first (unvoted before voted), then everything else
   filteredData = [...filteredData].sort((a, b) => {
@@ -2833,12 +2947,12 @@ function renderLibrary() {
     }
     list.innerHTML = '';
     list.appendChild(empty);
-    const countText = librarySearchText ? `0 of ${totalCount} songs` : '0 songs';
+    const countText = isNarrowed ? `0 of ${totalCount} songs` : '0 songs';
     document.getElementById('library-count').textContent = countText;
     return;
   }
 
-  const countText = librarySearchText
+  const countText = isNarrowed
     ? `${filteredData.length} of ${totalCount} songs`
     : `${totalCount} song${totalCount !== 1 ? 's' : ''}`;
   document.getElementById('library-count').textContent = countText;
@@ -2866,6 +2980,63 @@ function renderLibrary() {
     handle: '.drag-handle',
     onEnd(evt) { /* library is read-only order */ },
   });
+}
+
+// Keep the Library toolbar dropdowns in sync with the songs actually present
+function populateLibraryFilters() {
+  const base = libraryData.filter(s =>
+    !setListIds.includes(s.id) &&
+    (libraryShowArchived || s.extra?.Status !== 'Archived')
+  );
+
+  const tunings = [...new Set(
+    base.map(s => s.extra?.OurTuning || s.extra?.Tuning || '').filter(Boolean)
+  )].sort((a, b) => a.localeCompare(b));
+  if (libraryTuningFilter && !tunings.includes(libraryTuningFilter)) tunings.push(libraryTuningFilter);
+
+  const present = new Set(base.map(effectiveStatus).filter(Boolean));
+  if (libraryStatusFilter) present.add(libraryStatusFilter);
+  const statuses = STATUS_ORDER.filter(s => present.has(s));
+
+  rebuildSelect(document.getElementById('lib-filter-tuning'), tunings, libraryTuningFilter, 'All tunings');
+  rebuildSelect(document.getElementById('lib-filter-status'), statuses, libraryStatusFilter, 'All statuses');
+}
+
+function rebuildSelect(sel, values, current, allLabel) {
+  if (!sel) return;
+  sel.innerHTML = '';
+  const all = document.createElement('option');
+  all.value = '';
+  all.textContent = allLabel;
+  sel.appendChild(all);
+  values.forEach(v => {
+    const o = document.createElement('option');
+    o.value = v;
+    o.textContent = v;
+    sel.appendChild(o);
+  });
+  sel.value = current || '';
+  sel.classList.toggle('active', !!current);
+}
+
+// Set List: reorder ids so same-tuning songs are adjacent, then persist.
+// Stable — preserves first-appearance order of both groups and members.
+function groupSetListByTuning() {
+  const tuningOf = id => {
+    const s = songById(id);
+    return (s && (s.extra?.OurTuning || s.extra?.Tuning)) || '';
+  };
+  const order = [];
+  const groups = new Map();
+  setListIds.forEach(id => {
+    const key = tuningOf(id);
+    if (!groups.has(key)) { groups.set(key, []); order.push(key); }
+    groups.get(key).push(id);
+  });
+  setListIds = order.flatMap(k => groups.get(k));
+  saveSetlistDebounced();
+  renderSetList();
+  renderLibrary();
 }
 
 function renderSetList() {
@@ -4159,6 +4330,31 @@ document.getElementById('voting-modal-close').addEventListener('click', () => {
     };
     activateMobileTab('library-panel');
     mobileTabs.forEach(tab => tab.addEventListener('click', () => activateMobileTab(tab.dataset.panel)));
+  }
+
+  // ── Library filter toolbar + Set List grouping ────────────────────────────
+  const libTuningSel = document.getElementById('lib-filter-tuning');
+  if (libTuningSel) {
+    libTuningSel.addEventListener('change', e => { libraryTuningFilter = e.target.value; renderLibrary(); });
+  }
+  const libStatusSel = document.getElementById('lib-filter-status');
+  if (libStatusSel) {
+    libStatusSel.addEventListener('change', e => { libraryStatusFilter = e.target.value; renderLibrary(); });
+  }
+  const libArchivedBtn = document.getElementById('lib-show-archived');
+  if (libArchivedBtn) {
+    libArchivedBtn.addEventListener('click', () => {
+      libraryShowArchived = !libraryShowArchived;
+      libArchivedBtn.setAttribute('aria-pressed', String(libraryShowArchived));
+      renderLibrary();
+    });
+  }
+  const setGroupSel = document.getElementById('set-group-by');
+  if (setGroupSel) {
+    setGroupSel.addEventListener('change', e => {
+      if (e.target.value === 'tuning') groupSetListByTuning();
+      e.target.value = '';  // one-shot action, not a sticky mode
+    });
   }
 })();
 
