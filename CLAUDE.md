@@ -524,6 +524,35 @@ Committed and deployed the long-stacked uncommitted work, then ran a first full 
 - **Process notes for future changes:** real changes go through a branch → push (auto preview) → test the preview → PR → merge (= prod deploy) → delete branch. Docs-only edits like this one can go straight to `main` (no runtime risk). Testing signed-in features on a preview requires adding that preview's origin to Neon Trusted Origins (see gotcha).
 - **launchd service note:** local server now runs as `~/Library/LaunchAgents/com.rehearsal-planner.dev.plist` (not committed; machine-specific). See Local Development.
 
+### Session: Song Library & Set List Toolbars (2026-05-31)
+
+Removed the duplicate panel title on mobile and added filter/grouping toolbars to both panels. **All in `templates/index.html`.** Branch: `library-setlist-toolbars`, PR #2: https://github.com/jmsyng/rehearsal-planner/pull/2.
+
+**What was built:**
+
+- **Mobile title deduplication.** On mobile (≤800px) the panel name was shown twice — once in the `#mobile-tab-bar` tab and again in the `.panel-header h2`. Fixed with a single CSS rule: `@media (max-width: 800px) { .panel-header h2 { display: none; } }`. Desktop keeps both.
+
+- **Song Library toolbar** (`.panel-tools` inside `.panel-header`):
+  - `#lib-filter-tuning` — filter by tuning (dropdown). Options are derived from live `libraryData` on each render call (`populateLibraryFilters()`), so only actually-present tunings appear.
+  - `#lib-filter-status` — filter by status (dropdown). Uses `effectiveStatus(song)` helper: Archived → 'Archived', else `proposalStatus` (pending→Proposed, approved→Learning, rejected→Resting), else `songStatus || Status`.
+  - `#lib-show-archived` — show/hide archived songs toggle (button with `aria-pressed`). Default off (archived hidden, matching prior behavior).
+  - Count chip reads "N of M" whenever any filter is active (`isNarrowed` boolean).
+
+- **Set List toolbar:**
+  - `#set-group-by` — "Group by tuning" one-shot action. Stable-groups `setListIds` by `OurTuning || Tuning` (preserving first-appearance order for both groups and members), mutates `setListIds`, and calls `saveSetlistDebounced()` → persists the new order to the DB. Select resets to `''` after firing so it reads as an action, not a persistent mode.
+
+- **Toolbar styling.** New `.panel-tools`, `.toolbar-select`, `.toolbar-toggle` classes. Compact dropdowns styled like the existing `.hdr-search` bar (rounded, 1px border, `focus-within` accent). Per-panel themed overrides scoped under `#library-panel` (cyan) and `#setlist-panel` (amber). `.panel-header` changed from `justify-content: space-between` to `gap: 8px; flex-wrap: wrap` so controls wrap gracefully on narrow screens.
+
+**New JS globals/helpers added near `~2039`:** `libraryTuningFilter`, `libraryStatusFilter`, `libraryShowArchived`, `STATUS_ORDER`, `effectiveStatus()`.
+
+**New JS functions after `renderLibrary()`:** `populateLibraryFilters()` (rebuilds tuning + status selects from current library), `rebuildSelect(sel, values, current, allLabel)` (generic select rebuilder, toggles `.active` class), `groupSetListByTuning()` (one-shot reorder + save).
+
+**Also in this session:** Added a session-start guardrail to the top of `CLAUDE.md` (after the `# Rehearsal Planner` title) to prevent future sessions from assuming a React/TypeScript stack. Prompted by two consecutive sessions that fired a "tampering alarm" after flooding `Read` calls for nonexistent `src/App.tsx` etc., then misread the "file not found" flood as adversarial injection.
+
+**PR state at session end:** Two commits on `library-setlist-toolbars` — `441023f` (toolbar feature) and `03d332c` (CLAUDE.md guardrail). Not yet merged. Preview testing requires adding the branch's Vercel preview origin to Neon Trusted Origins first.
+
+**Uncommitted:** `app.py` has a local configurable-port change (`python3 app.py [port]` or `$PORT`) that wasn't part of this session and wasn't put in the PR.
+
 ## Maintenance Pattern for This File
 
 When future sessions do meaningful work in this project, ask Claude:
