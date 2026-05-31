@@ -3,6 +3,7 @@ load_dotenv()
 
 import json
 import os
+import sys
 import urllib.request
 import urllib.parse
 import urllib.error
@@ -162,16 +163,16 @@ def api_get_songs():
 @require_auth
 def api_add_song():
     song = request.get_json(force=True)
-    if not song or not song.get("id") or not song.get("name"):
-        return jsonify({"error": "id and name are required"}), 400
+    if not song or not song.get("name"):
+        return jsonify({"error": "name is required"}), 400
     band = db.get_user_band(g.user_id)
     band_id = band["id"] if band else None
     saved = db.upsert_song(g.user_id, song, band_id=band_id)
     if band_id:
-        db.create_proposal(band_id, song["id"], g.user_id)
+        db.create_proposal(band_id, saved["id"], g.user_id)
         # Return the enriched band song so the frontend gets proposal metadata immediately
         for s in db.get_band_songs(band_id, g.user_id):
-            if s["id"] == song["id"]:
+            if s["id"] == saved["id"]:
                 return jsonify(s), 201
     return jsonify(saved), 201
 
@@ -303,8 +304,8 @@ def get_initial_songs():
                 "Tuning": s.get("tuning"),
             }
         }
-        db.upsert_song(g.user_id, song)
-        result.append(song)
+        saved = db.upsert_song(g.user_id, song)
+        result.append(saved)
 
     return jsonify(result)
 
@@ -636,10 +637,14 @@ def get_album_art(artist, track):
 
 
 if __name__ == "__main__":
-    print("Rehearsal Planner running at http://localhost:5050")
+    # Port is configurable so a throwaway preview server can run alongside the
+    # persistent launchd server (which owns 5050). CLI arg wins, then $PORT,
+    # else the default 5050. See CLAUDE.md "Keeping localhost up".
+    _port = int(sys.argv[1]) if len(sys.argv) > 1 else int(os.environ.get("PORT", 5050))
+    print(f"Rehearsal Planner running at http://localhost:{_port}")
     # When supervised by launchd (RP_SERVICE=1) run a single process so the
     # supervisor cleanly owns/restarts it; the Werkzeug auto-reloader's extra
     # child process confuses external supervisors. Plain `python3 app.py` keeps
     # the reloader on for normal local dev. Templates still hot-reload either way.
     _service = os.environ.get("RP_SERVICE") == "1"
-    app.run(debug=True, port=5050, use_reloader=not _service)
+    app.run(debug=True, port=_port, use_reloader=not _service)

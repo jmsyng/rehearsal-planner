@@ -1,6 +1,7 @@
 import json
 import math
 import os
+import uuid as _uuidlib
 import psycopg2
 from psycopg2.extras import RealDictCursor
 
@@ -8,7 +9,7 @@ DEFAULT_TUNINGS = ['E standard', 'Eb', 'Drop D', 'Drop C#']
 
 # 5-point Likert scale — stored as strings "1"–"5"
 VOTE_POINTS = {"5": 5, "4": 4, "3": 3, "2": 2, "1": 1}
-# Approval threshold = math.ceil(band_size * 3.5), computed dynamically in cast_vote
+# Approval threshold = math.ceil(band_size * approval_factor), computed in cast_vote
 
 
 def get_conn():
@@ -24,15 +25,103 @@ def put_conn(conn):
         pass
 
 
+def _is_uuid(value) -> bool:
+    """True if `value` is a syntactically valid UUID (i.e. a server-assigned song id)."""
+    try:
+        _uuidlib.UUID(str(value))
+        return True
+    except (ValueError, AttributeError, TypeError):
+        return False
+
+
 # ── Songs ──────────────────────────────────────────────────────────────────────
+#
+# NEW MODEL (post multi-band/multi-setlist migration):
+#   • songs.id is a server-assigned UUID (was a client string).
+#   • the old client string lives on as songs.external_id (Spotify ID or custom).
+#   • a song belongs to exactly ONE owner: band_id XOR user_id (DB CHECK enforces it).
+#   • `plays` no longer lives on the song — it's per-setlist (setlist_songs.plays).
+#     We surface a song's play count from its owner's default setlist so the current
+#     UI keeps showing the right number.
+
+def _song_fields(song: dict) -> dict:
+    """Map the JS song object's editable fields to DB columns."""
+    extra = song.get("extra") or {}
+    return {
+        "name":            song["name"],
+        "duration_raw":    song.get("duration_raw", ""),
+        "duration_sec":    song.get("duration_seconds", 0),
+        "artist":          extra.get("Artist", ""),
+        "status":          extra.get("Status", "For Consideration"),
+        "tuning":          extra.get("Tuning"),
+        "recorded_tuning": extra.get("RecordedTuning"),
+        "our_tuning":      extra.get("OurTuning"),
+        "album_art":       extra.get("albumArt"),
+        "spotify_url":     extra.get("spotifyUrl"),
+        "youtube_link":    extra.get("YouTubeLink"),
+    }
+
+
+def _row_to_song(row) -> dict:
+    """Convert a DB row to the JS-compatible song object shape."""
+    return {
+        "id": str(row["id"]),
+        "name": row["name"],
+        "duration_raw": row["duration_raw"],
+        "duration_seconds": row["duration_sec"],
+        "plays": row.get("plays") or 1,
+        "extra": {
+            "Artist": row["artist"],
+            "Status": row["status"],
+            "Tuning": row["tuning"],
+            "RecordedTuning": row["recorded_tuning"],
+            "OurTuning": row["our_tuning"],
+            "albumArt": row["album_art"],
+            "spotifyUrl": row["spotify_url"],
+            "YouTubeLink": row["youtube_link"],
+            "externalId": row.get("external_id"),
+        }
+    }
+
+
+def _row_to_band_song(row) -> dict:
+    """Like _row_to_song but includes band proposal metadata."""
+    song = _row_to_song(row)
+    song["extra"]["proposerName"]    = row.get("proposer_name")
+    song["extra"]["proposedBy"]      = row.get("proposer_id")
+    song["extra"]["proposalId"]      = str(row["proposal_id"]) if row.get("proposal_id") else None
+    song["extra"]["proposalStatus"]  = row.get("proposal_status")
+    song["extra"]["proposalScore"]   = row.get("proposal_score")
+    song["extra"]["userVote"]        = row.get("user_vote")
+    song["extra"]["userVoteReason"]  = row.get("user_vote_reason")
+    raw_votes = row.get("proposal_votes")
+    if isinstance(raw_votes, str):
+        raw_votes = json.loads(raw_votes)
+    song["extra"]["proposalVotes"]   = raw_votes or []
+    return song
+
+
+# Correlated subquery that pulls a song's play count from its owner's default
+# (earliest-created) setlist, so _row_to_song's `plays` matches the old behaviour.
+_PLAYS_SUBQUERY = """
+    (SELECT ss.plays
+       FROM setlist_songs ss
+       JOIN setlists sl ON sl.id = ss.setlist_id
+      WHERE ss.song_id = s.id AND sl.{owner_col} = %(owner)s
+      ORDER BY sl.created_at
+      LIMIT 1) AS plays
+"""
+
 
 def get_songs(user_id: str) -> list:
+    """A user's personal library (songs they own directly, not via a band)."""
     conn = get_conn()
     try:
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
             cur.execute(
-                "SELECT * FROM songs WHERE user_id = %s ORDER BY created_at",
-                (user_id,)
+                "SELECT s.*, " + _PLAYS_SUBQUERY.format(owner_col="user_id") +
+                " FROM songs s WHERE s.user_id = %(owner)s ORDER BY s.created_at",
+                {"owner": user_id}
             )
             rows = cur.fetchall()
         return [_row_to_song(r) for r in rows]
@@ -41,50 +130,82 @@ def get_songs(user_id: str) -> list:
 
 
 def upsert_song(user_id: str, song: dict, band_id: str = None) -> dict:
+    """
+    Create or update a song.
+      • If song['id'] is an existing song UUID owned by this owner -> UPDATE it.
+      • Otherwise CREATE a new song; song['id'] becomes external_id, and a fresh
+        UUID is assigned. If that external_id already exists in this library, the
+        existing row is updated (duplicate guard -> graceful upsert).
+    Owner is the band (if band_id given) else the user. added_by is always the actor.
+    Returns the saved song (with its real UUID id).
+    """
+    f = _song_fields(song)
+    incoming = str(song.get("id") or "")
+    ins_band_id = band_id
+    ins_user_id = None if band_id else user_id
     conn = get_conn()
     try:
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
-            cur.execute("""
-                INSERT INTO songs
-                  (id, user_id, name, duration_raw, duration_sec, plays,
-                   artist, status, tuning, recorded_tuning, our_tuning,
-                   album_art, spotify_url, youtube_link, band_id)
-                VALUES
-                  (%(id)s, %(user_id)s, %(name)s, %(duration_raw)s, %(duration_sec)s, %(plays)s,
-                   %(artist)s, %(status)s, %(tuning)s, %(recorded_tuning)s, %(our_tuning)s,
-                   %(album_art)s, %(spotify_url)s, %(youtube_link)s, %(band_id)s)
-                ON CONFLICT (id, user_id) DO UPDATE SET
-                  name            = EXCLUDED.name,
-                  duration_raw    = EXCLUDED.duration_raw,
-                  duration_sec    = EXCLUDED.duration_sec,
-                  plays           = EXCLUDED.plays,
-                  artist          = EXCLUDED.artist,
-                  status          = EXCLUDED.status,
-                  tuning          = EXCLUDED.tuning,
-                  recorded_tuning = EXCLUDED.recorded_tuning,
-                  our_tuning      = EXCLUDED.our_tuning,
-                  album_art       = EXCLUDED.album_art,
-                  spotify_url     = EXCLUDED.spotify_url,
-                  youtube_link    = EXCLUDED.youtube_link,
-                  band_id         = COALESCE(songs.band_id, EXCLUDED.band_id)
-                RETURNING *
-            """, {
-                "id": song["id"],
-                "user_id": user_id,
-                "name": song["name"],
-                "duration_raw": song.get("duration_raw", ""),
-                "duration_sec": song.get("duration_seconds", 0),
-                "plays": song.get("plays", 1),
-                "artist": (song.get("extra") or {}).get("Artist", ""),
-                "status": (song.get("extra") or {}).get("Status", "For Consideration"),
-                "tuning": (song.get("extra") or {}).get("Tuning"),
-                "recorded_tuning": (song.get("extra") or {}).get("RecordedTuning"),
-                "our_tuning": (song.get("extra") or {}).get("OurTuning"),
-                "album_art": (song.get("extra") or {}).get("albumArt"),
-                "spotify_url": (song.get("extra") or {}).get("spotifyUrl"),
-                "youtube_link": (song.get("extra") or {}).get("YouTubeLink"),
-                "band_id": band_id,
-            })
+            # ── UPDATE path: incoming id is an existing UUID for this owner ──
+            if _is_uuid(incoming):
+                owner_pred = "band_id = %(owner)s" if band_id else "user_id = %(owner)s"
+                cur.execute(f"""
+                    UPDATE songs SET
+                      name=%(name)s, duration_raw=%(duration_raw)s, duration_sec=%(duration_sec)s,
+                      artist=%(artist)s, status=%(status)s, tuning=%(tuning)s,
+                      recorded_tuning=%(recorded_tuning)s, our_tuning=%(our_tuning)s,
+                      album_art=%(album_art)s, spotify_url=%(spotify_url)s, youtube_link=%(youtube_link)s
+                    WHERE id=%(id)s AND {owner_pred}
+                    RETURNING *
+                """, {**f, "id": incoming, "owner": (band_id if band_id else user_id)})
+                row = cur.fetchone()
+                if row:
+                    conn.commit()
+                    return _row_to_song(row)
+                # fall through to CREATE if the UUID didn't match a row for this owner
+
+            # ── CREATE path ──
+            external_id = None if _is_uuid(incoming) else (incoming or None)
+            params = {**f, "external_id": external_id, "band_id": ins_band_id,
+                      "user_id": ins_user_id, "added_by": user_id}
+
+            if external_id is None:
+                # No external id -> no duplicate guard applies -> plain insert.
+                cur.execute("""
+                    INSERT INTO songs
+                      (external_id, band_id, user_id, added_by, name, duration_raw,
+                       duration_sec, artist, status, tuning, recorded_tuning, our_tuning,
+                       album_art, spotify_url, youtube_link)
+                    VALUES
+                      (%(external_id)s, %(band_id)s, %(user_id)s, %(added_by)s, %(name)s,
+                       %(duration_raw)s, %(duration_sec)s, %(artist)s, %(status)s, %(tuning)s,
+                       %(recorded_tuning)s, %(our_tuning)s, %(album_art)s, %(spotify_url)s,
+                       %(youtube_link)s)
+                    RETURNING *
+                """, params)
+            else:
+                conflict_col = "band_id" if band_id else "user_id"
+                cur.execute(f"""
+                    INSERT INTO songs
+                      (external_id, band_id, user_id, added_by, name, duration_raw,
+                       duration_sec, artist, status, tuning, recorded_tuning, our_tuning,
+                       album_art, spotify_url, youtube_link)
+                    VALUES
+                      (%(external_id)s, %(band_id)s, %(user_id)s, %(added_by)s, %(name)s,
+                       %(duration_raw)s, %(duration_sec)s, %(artist)s, %(status)s, %(tuning)s,
+                       %(recorded_tuning)s, %(our_tuning)s, %(album_art)s, %(spotify_url)s,
+                       %(youtube_link)s)
+                    ON CONFLICT ({conflict_col}, external_id)
+                      WHERE {conflict_col} IS NOT NULL AND external_id IS NOT NULL
+                    DO UPDATE SET
+                      name=EXCLUDED.name, duration_raw=EXCLUDED.duration_raw,
+                      duration_sec=EXCLUDED.duration_sec, artist=EXCLUDED.artist,
+                      status=EXCLUDED.status, tuning=EXCLUDED.tuning,
+                      recorded_tuning=EXCLUDED.recorded_tuning, our_tuning=EXCLUDED.our_tuning,
+                      album_art=EXCLUDED.album_art, spotify_url=EXCLUDED.spotify_url,
+                      youtube_link=EXCLUDED.youtube_link
+                    RETURNING *
+                """, params)
             row = cur.fetchone()
         conn.commit()
         return _row_to_song(row)
@@ -132,78 +253,144 @@ def delete_band_song(band_id: str, song_id: str) -> bool:
         put_conn(conn)
 
 
-def _row_to_song(row) -> dict:
-    """Convert a DB row to the JS-compatible song object shape."""
-    return {
-        "id": row["id"],
-        "name": row["name"],
-        "duration_raw": row["duration_raw"],
-        "duration_seconds": row["duration_sec"],
-        "plays": row["plays"],
-        "extra": {
-            "Artist": row["artist"],
-            "Status": row["status"],
-            "Tuning": row["tuning"],
-            "RecordedTuning": row["recorded_tuning"],
-            "OurTuning": row["our_tuning"],
-            "albumArt": row["album_art"],
-            "spotifyUrl": row["spotify_url"],
-            "YouTubeLink": row["youtube_link"],
-        }
-    }
+def get_band_songs(band_id: str, user_id: str) -> list:
+    conn = get_conn()
+    try:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute("""
+                SELECT s.*,
+                       """ + _PLAYS_SUBQUERY.format(owner_col="band_id") + """,
+                       COALESCE(up.display_name, nu.name, nu.email) AS proposer_name,
+                       sp.id              AS proposal_id,
+                       sp.proposed_by::text AS proposer_id,
+                       sp.status          AS proposal_status,
+                       sp.score           AS proposal_score,
+                       sv_me.vote         AS user_vote,
+                       sv_me.reason       AS user_vote_reason,
+                       (SELECT json_agg(json_build_object(
+                                  'vote', sv2.vote,
+                                  'name', COALESCE(up2.display_name, nu2.name, nu2.email),
+                                  'reason', sv2.reason))
+                          FROM song_votes sv2
+                          JOIN neon_auth."user" nu2 ON nu2.id = sv2.user_id
+                          LEFT JOIN user_profiles up2 ON up2.user_id = sv2.user_id
+                         WHERE sv2.proposal_id = sp.id
+                       ) AS proposal_votes
+                FROM songs s
+                LEFT JOIN neon_auth."user" nu ON nu.id = s.added_by
+                LEFT JOIN user_profiles up ON up.user_id = s.added_by
+                LEFT JOIN song_proposals sp
+                       ON sp.song_id = s.id
+                      AND sp.band_id = %(owner)s
+                      AND sp.status  IN ('pending', 'approved')
+                LEFT JOIN song_votes sv_me
+                       ON sv_me.proposal_id = sp.id
+                      AND sv_me.user_id = %(user_id)s
+                WHERE s.band_id = %(owner)s
+                ORDER BY s.created_at
+            """, {"owner": band_id, "user_id": user_id})
+            rows = cur.fetchall()
+        return [_row_to_band_song(r) for r in rows]
+    finally:
+        put_conn(conn)
 
 
-def _row_to_band_song(row) -> dict:
-    """Like _row_to_song but includes band proposal metadata."""
-    song = _row_to_song(row)
-    song["extra"]["proposerName"]    = row.get("proposer_name")
-    song["extra"]["proposedBy"]      = row.get("proposer_id")
-    song["extra"]["proposalId"]      = str(row["proposal_id"]) if row.get("proposal_id") else None
-    song["extra"]["proposalStatus"]  = row.get("proposal_status")
-    song["extra"]["proposalScore"]   = row.get("proposal_score")
-    song["extra"]["userVote"]        = row.get("user_vote")
-    song["extra"]["userVoteReason"]  = row.get("user_vote_reason")
-    raw_votes = row.get("proposal_votes")
-    if isinstance(raw_votes, str):
-        raw_votes = json.loads(raw_votes)
-    song["extra"]["proposalVotes"]   = raw_votes or []
-    return song
+# ── Set Lists ────────────────────────────────────────────────────────────────────
+#
+# The schema supports many named setlists per owner. Until the multi-setlist UI
+# exists, the app uses ONE default setlist per owner: the earliest-created one,
+# created on demand. These helpers hide that behind the old single-setlist API.
 
+def _default_setlist_id(cur, *, user_id=None, band_id=None, create=False):
+    """Return the owner's default (earliest) setlist id, optionally creating one."""
+    if band_id:
+        cur.execute(
+            "SELECT id FROM setlists WHERE band_id = %s ORDER BY created_at LIMIT 1",
+            (band_id,)
+        )
+    else:
+        cur.execute(
+            "SELECT id FROM setlists WHERE user_id = %s ORDER BY created_at LIMIT 1",
+            (user_id,)
+        )
+    row = cur.fetchone()
+    if row:
+        return row[0]
+    if not create:
+        return None
+    cur.execute(
+        "INSERT INTO setlists (name, band_id, user_id) VALUES ('Main Set', %s, %s) RETURNING id",
+        (band_id, None if band_id else user_id)
+    )
+    return cur.fetchone()[0]
 
-# ── Set List ───────────────────────────────────────────────────────────────────
 
 def get_setlist(user_id: str) -> list:
-    """Returns ordered list of song_ids."""
+    """Returns ordered list of song UUIDs in the user's default setlist."""
     conn = get_conn()
     try:
         with conn.cursor() as cur:
+            sid = _default_setlist_id(cur, user_id=user_id)
+            if not sid:
+                return []
             cur.execute(
-                "SELECT song_id FROM set_list_songs WHERE user_id = %s ORDER BY position",
-                (user_id,)
+                "SELECT song_id FROM setlist_songs WHERE setlist_id = %s ORDER BY position",
+                (sid,)
             )
-            return [r[0] for r in cur.fetchall()]
+            return [str(r[0]) for r in cur.fetchall()]
     finally:
         put_conn(conn)
 
 
 def save_setlist(user_id: str, entries: list) -> None:
-    """
-    entries: [{"song_id": str, "position": int, "plays": int}, ...]
-    Fully replaces the user's set list.
-    """
+    """entries: [{"song_id": uuid, "position": int, "plays": int}, ...] — full replace."""
     conn = get_conn()
     try:
         with conn.cursor() as cur:
-            cur.execute("""
-                INSERT INTO set_lists (user_id) VALUES (%s)
-                ON CONFLICT (user_id) DO UPDATE SET updated_at = now()
-            """, (user_id,))
-            cur.execute("DELETE FROM set_list_songs WHERE user_id = %s", (user_id,))
+            sid = _default_setlist_id(cur, user_id=user_id, create=True)
+            cur.execute("DELETE FROM setlist_songs WHERE setlist_id = %s", (sid,))
             if entries:
                 cur.executemany(
-                    "INSERT INTO set_list_songs (user_id, song_id, position, plays) VALUES (%s, %s, %s, %s)",
-                    [(user_id, e["song_id"], e["position"], e.get("plays", 1)) for e in entries]
+                    "INSERT INTO setlist_songs (setlist_id, song_id, position, plays) VALUES (%s, %s, %s, %s)",
+                    [(sid, e["song_id"], e["position"], e.get("plays", 1)) for e in entries]
                 )
+            cur.execute("UPDATE setlists SET updated_at = now() WHERE id = %s", (sid,))
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        put_conn(conn)
+
+
+def get_band_setlist(band_id: str) -> list:
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            sid = _default_setlist_id(cur, band_id=band_id)
+            if not sid:
+                return []
+            cur.execute(
+                "SELECT song_id FROM setlist_songs WHERE setlist_id = %s ORDER BY position",
+                (sid,)
+            )
+            return [str(r[0]) for r in cur.fetchall()]
+    finally:
+        put_conn(conn)
+
+
+def save_band_setlist(band_id: str, entries: list) -> None:
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            sid = _default_setlist_id(cur, band_id=band_id, create=True)
+            cur.execute("DELETE FROM setlist_songs WHERE setlist_id = %s", (sid,))
+            if entries:
+                cur.executemany(
+                    "INSERT INTO setlist_songs (setlist_id, song_id, position, plays) VALUES (%s, %s, %s, %s)",
+                    [(sid, e["song_id"], e["position"], e.get("plays", 1)) for e in entries]
+                )
+            cur.execute("UPDATE setlists SET updated_at = now() WHERE id = %s", (sid,))
         conn.commit()
     except Exception:
         conn.rollback()
@@ -249,7 +436,9 @@ def add_tuning(user_id: str, tuning: str) -> None:
 # ── Band ────────────────────────────────────────────────────────────────────────
 
 def get_user_band(user_id: str):
-    """Returns band info dict with members, or None if user not in a band."""
+    """Returns band info dict with members, or None if user not in a band.
+    NOTE: still single-band (LIMIT 1) until the multi-band UI lands; the schema
+    already allows a user to be in several bands."""
     conn = get_conn()
     try:
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
@@ -357,93 +546,53 @@ def join_band(user_id: str, invite_token: str) -> dict:
 
 
 def migrate_songs_to_band(user_id: str, band_id: str) -> None:
-    """Adopt all of a user's personal songs into the band library."""
+    """
+    Adopt a user's personal songs into the band library by changing ownership
+    (band_id set, user_id cleared — required by the one-owner CHECK). Songs that
+    would duplicate an existing band song (same external_id) are left personal to
+    avoid a duplicate-guard violation. Also copies the user's default setlist into
+    the band's default setlist.
+    """
     conn = get_conn()
     try:
         with conn.cursor() as cur:
-            cur.execute(
-                "UPDATE songs SET band_id = %s WHERE user_id = %s AND band_id IS NULL",
-                (band_id, user_id)
-            )
-            cur.execute("""
-                INSERT INTO band_set_list_songs (band_id, song_id, position, plays)
-                SELECT %s, song_id, position, plays
-                FROM set_list_songs
-                WHERE user_id = %s
-                ON CONFLICT (band_id, song_id) DO NOTHING
-            """, (band_id, user_id))
-        conn.commit()
-    except Exception:
-        conn.rollback()
-        raise
-    finally:
-        put_conn(conn)
-
-
-def get_band_songs(band_id: str, user_id: str) -> list:
-    conn = get_conn()
-    try:
-        with conn.cursor(cursor_factory=RealDictCursor) as cur:
-            cur.execute("""
-                SELECT s.*,
-                       COALESCE(up.display_name, nu.name, nu.email) AS proposer_name,
-                       sp.id              AS proposal_id,
-                       sp.proposed_by::text AS proposer_id,
-                       sp.status          AS proposal_status,
-                       sp.score           AS proposal_score,
-                       sv_me.vote         AS user_vote,
-                       sv_me.reason       AS user_vote_reason,
-                       (SELECT json_agg(json_build_object(
-                                  'vote', sv2.vote,
-                                  'name', COALESCE(up2.display_name, nu2.name, nu2.email),
-                                  'reason', sv2.reason))
-                          FROM song_votes sv2
-                          JOIN neon_auth."user" nu2 ON nu2.id = sv2.user_id
-                          LEFT JOIN user_profiles up2 ON up2.user_id = sv2.user_id
-                         WHERE sv2.proposal_id = sp.id
-                       ) AS proposal_votes
-                FROM songs s
-                LEFT JOIN neon_auth."user" nu ON nu.id = s.user_id
-                LEFT JOIN user_profiles up ON up.user_id = s.user_id
-                LEFT JOIN song_proposals sp
-                       ON sp.song_id = s.id
-                      AND sp.band_id = %(band_id)s
-                      AND sp.status  IN ('pending', 'approved')
-                LEFT JOIN song_votes sv_me
-                       ON sv_me.proposal_id = sp.id
-                      AND sv_me.user_id = %(user_id)s
-                WHERE s.band_id = %(band_id)s
-                ORDER BY s.created_at
-            """, {"band_id": band_id, "user_id": user_id})
-            rows = cur.fetchall()
-        return [_row_to_band_song(r) for r in rows]
-    finally:
-        put_conn(conn)
-
-
-def get_band_setlist(band_id: str) -> list:
-    conn = get_conn()
-    try:
-        with conn.cursor() as cur:
-            cur.execute(
-                "SELECT song_id FROM band_set_list_songs WHERE band_id = %s ORDER BY position",
-                (band_id,)
-            )
-            return [r[0] for r in cur.fetchall()]
-    finally:
-        put_conn(conn)
-
-
-def save_band_setlist(band_id: str, entries: list) -> None:
-    conn = get_conn()
-    try:
-        with conn.cursor() as cur:
-            cur.execute("DELETE FROM band_set_list_songs WHERE band_id = %s", (band_id,))
-            if entries:
-                cur.executemany(
-                    "INSERT INTO band_set_list_songs (band_id, song_id, position, plays) VALUES (%s, %s, %s, %s)",
-                    [(band_id, e["song_id"], e["position"], e.get("plays", 1)) for e in entries]
+            # 1. Capture the user's current default-setlist ordering BEFORE reassigning,
+            #    so we can rebuild it on the band side (song UUIDs are unchanged).
+            user_sid = _default_setlist_id(cur, user_id=user_id)
+            setlist_rows = []
+            if user_sid:
+                cur.execute(
+                    "SELECT song_id, position, plays FROM setlist_songs "
+                    "WHERE setlist_id = %s ORDER BY position", (user_sid,)
                 )
+                setlist_rows = cur.fetchall()
+
+            # 2. Move non-conflicting personal songs to the band.
+            cur.execute("""
+                UPDATE songs SET band_id = %s, user_id = NULL,
+                                 added_by = COALESCE(added_by, %s)
+                WHERE user_id = %s
+                  AND (external_id IS NULL OR NOT EXISTS (
+                        SELECT 1 FROM songs b
+                        WHERE b.band_id = %s AND b.external_id = songs.external_id))
+            """, (band_id, user_id, user_id, band_id))
+
+            # 3. Copy the captured setlist into the band's default setlist, keeping only
+            #    songs that actually made it to the band (i.e. now owned by this band).
+            if setlist_rows:
+                band_sid = _default_setlist_id(cur, band_id=band_id, create=True)
+                for sr in setlist_rows:
+                    song_id, position, plays = sr[0], sr[1], sr[2]
+                    cur.execute(
+                        "SELECT 1 FROM songs WHERE id = %s AND band_id = %s",
+                        (song_id, band_id)
+                    )
+                    if cur.fetchone():
+                        cur.execute("""
+                            INSERT INTO setlist_songs (setlist_id, song_id, position, plays)
+                            VALUES (%s, %s, %s, %s)
+                            ON CONFLICT (setlist_id, song_id) DO NOTHING
+                        """, (band_sid, song_id, position, plays))
         conn.commit()
     except Exception:
         conn.rollback()
@@ -453,7 +602,8 @@ def save_band_setlist(band_id: str, entries: list) -> None:
 
 
 def create_proposal(band_id: str, song_id: str, proposed_by: str) -> dict:
-    """Create a proposal, auto-vote 5 (Love it) for proposer, and notify other members."""
+    """Create a proposal, auto-vote 5 (Love it) for proposer, and notify other members.
+    `song_id` must be the song's UUID."""
     conn = get_conn()
     try:
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
@@ -495,7 +645,6 @@ def cast_vote(proposal_id: str, user_id: str, vote: str, reason: str = None) -> 
     conn = get_conn()
     try:
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
-            # Accept votes on pending OR approved proposals
             cur.execute("""
                 SELECT sp.id, sp.band_id, sp.song_id, sp.status,
                        COUNT(bm.user_id) AS band_size,
@@ -515,7 +664,6 @@ def cast_vote(proposal_id: str, user_id: str, vote: str, reason: str = None) -> 
             approval_factor = float(proposal["approval_factor"])
             approval_threshold = math.ceil(band_size * approval_factor)
 
-            # Upsert the vote (with optional reason)
             cur.execute("""
                 INSERT INTO song_votes (proposal_id, user_id, vote, reason)
                 VALUES (%s, %s, %s, %s)
@@ -523,7 +671,6 @@ def cast_vote(proposal_id: str, user_id: str, vote: str, reason: str = None) -> 
                 DO UPDATE SET vote = EXCLUDED.vote, reason = EXCLUDED.reason
             """, (proposal_id, user_id, vote, reason or None))
 
-            # Recompute score
             cur.execute("""
                 SELECT vote, COUNT(*) AS cnt
                 FROM song_votes WHERE proposal_id = %s
@@ -538,7 +685,7 @@ def cast_vote(proposal_id: str, user_id: str, vote: str, reason: str = None) -> 
 
             cur.execute("UPDATE song_proposals SET score = %s WHERE id = %s", (score, proposal_id))
 
-            new_status = proposal["status"]  # default: unchanged
+            new_status = proposal["status"]
 
             if proposal["status"] == "pending":
                 if score >= approval_threshold:
@@ -573,7 +720,6 @@ def cast_vote(proposal_id: str, user_id: str, vote: str, reason: str = None) -> 
                     (new_status, proposal_id)
                 )
 
-            # Mark related notifications read for this user
             cur.execute("""
                 UPDATE notifications SET read = true
                 WHERE user_id = %s AND proposal_id = %s
@@ -590,7 +736,6 @@ def cast_vote(proposal_id: str, user_id: str, vote: str, reason: str = None) -> 
 
 def _notify_failure(cur, band_id, proposal_id, song_id, vote_counts, score, band_size, notif_type):
     """Send a failure/demotion notification to all band members with the vote breakdown."""
-    # Fetch full vote detail (name + vote + reason) for the notification payload
     cur.execute("""
         SELECT sv.vote, sv.reason,
                COALESCE(up.display_name, nu.name, nu.email) AS name
@@ -623,16 +768,18 @@ def _notify_failure(cur, band_id, proposal_id, song_id, vote_counts, score, band
 
 
 def _auto_add_to_setlist(cur, band_id: str, song_id: str) -> None:
+    """Append an approved song to the band's default setlist."""
+    sid = _default_setlist_id(cur, band_id=band_id, create=True)
     cur.execute(
-        "SELECT COALESCE(MAX(position), 0) + 1 FROM band_set_list_songs WHERE band_id = %s",
-        (band_id,)
+        "SELECT COALESCE(MAX(position), 0) + 1 FROM setlist_songs WHERE setlist_id = %s",
+        (sid,)
     )
     next_pos = cur.fetchone()[0]
     cur.execute("""
-        INSERT INTO band_set_list_songs (band_id, song_id, position, plays)
+        INSERT INTO setlist_songs (setlist_id, song_id, position, plays)
         VALUES (%s, %s, %s, 1)
-        ON CONFLICT (band_id, song_id) DO NOTHING
-    """, (band_id, song_id, next_pos))
+        ON CONFLICT (setlist_id, song_id) DO NOTHING
+    """, (sid, song_id, next_pos))
 
 
 def get_pending_proposals(band_id: str, user_id: str) -> list:
@@ -641,7 +788,7 @@ def get_pending_proposals(band_id: str, user_id: str) -> list:
     try:
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
             cur.execute("""
-                SELECT sp.id, sp.song_id, sp.proposed_by::text, sp.score, sp.created_at,
+                SELECT sp.id, sp.song_id::text, sp.proposed_by::text, sp.score, sp.created_at,
                        COALESCE(up.display_name, nu.name, nu.email) AS proposer_name,
                        s.name AS song_name, s.artist, s.duration_raw,
                        s.album_art, s.spotify_url, s.duration_sec
@@ -936,7 +1083,6 @@ def leave_band(user_id: str, band_id: str) -> None:
             total = cur.fetchone()["c"]
 
             if total <= 1:
-                # Last member leaving — remove the band entirely (cascades).
                 cur.execute("DELETE FROM bands WHERE id = %s", (band_id,))
                 conn.commit()
                 return

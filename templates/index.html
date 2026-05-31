@@ -3331,7 +3331,7 @@ async function spotifySearch() {
 
 async function addFromSpotify(track) {
   const song = {
-    id: `song-spotify-${Date.now()}`,
+    id: track.id,
     name: track.name,
     duration_raw: track.duration_str,
     duration_seconds: track.duration_sec,
@@ -3574,7 +3574,7 @@ async function performAddSongSpotifySearch() {
 
 async function addSpotifySong(track, destination) {
   const newSong = {
-    id: `song-${Date.now()}`,
+    id: track.id,
     name: track.name,
     duration_raw: track.duration_str,
     duration_seconds: track.duration_sec,
@@ -3582,6 +3582,7 @@ async function addSpotifySong(track, destination) {
     extra: {
       Artist: track.artist,
       albumArt: track.image,
+      spotifyUrl: track.spotify_url,
     },
   };
 
@@ -3629,7 +3630,6 @@ async function addCustomSong(destination) {
   }
 
   const newSong = {
-    id: `song-${Date.now()}`,
     name,
     duration_raw: duration,
     duration_seconds: parse_duration(duration),
