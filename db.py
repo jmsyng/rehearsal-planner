@@ -116,16 +116,9 @@ def _row_to_band_song(row) -> dict:
     return song
 
 
-# Correlated subquery that pulls a song's play count from its owner's default
-# (earliest-created) setlist, so _row_to_song's `plays` matches the old behaviour.
-_PLAYS_SUBQUERY = """
-    (SELECT ss.plays
-       FROM setlist_songs ss
-       JOIN setlists sl ON sl.id = ss.setlist_id
-      WHERE ss.song_id = s.id AND sl.{owner_col} = %(owner)s
-      ORDER BY sl.created_at
-      LIMIT 1) AS plays
-"""
+# Plays are per-setlist (setlist_songs.plays). Songs loaded from GET /api/songs
+# always return plays=1; the correct per-setlist value is overlaid by
+# applySetlistResponse() on the frontend after GET /api/setlist returns.
 
 
 def get_songs(user_id: str) -> list:
@@ -134,9 +127,9 @@ def get_songs(user_id: str) -> list:
     try:
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
             cur.execute(
-                "SELECT s.*, " + _PLAYS_SUBQUERY.format(owner_col="user_id") +
-                " FROM songs s WHERE s.user_id = %(owner)s ORDER BY s.created_at",
-                {"owner": user_id}
+                "SELECT s.*, 1 AS plays"
+                " FROM songs s WHERE s.user_id = %s ORDER BY s.created_at",
+                (user_id,)
             )
             rows = cur.fetchall()
         return [_row_to_song(r) for r in rows]
@@ -279,8 +272,7 @@ def get_band_songs(band_id: str, user_id: str) -> list:
     try:
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
             cur.execute("""
-                SELECT s.*,
-                       """ + _PLAYS_SUBQUERY.format(owner_col="band_id") + """,
+                SELECT s.*, 1 AS plays,
                        COALESCE(up.display_name, nu.name, nu.email) AS proposer_name,
                        sp.id              AS proposal_id,
                        sp.proposed_by::text AS proposer_id,

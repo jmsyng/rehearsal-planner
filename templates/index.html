@@ -2607,9 +2607,13 @@ function setBandChrome(hasBand) {
 // ── API Data Layer ────────────────────────────────────────────────────────────
 
 // Apply the new GET /api/setlist response shape: {setlist_id, settings, entries}.
-// Overlays the active setlist's plays onto the shared libraryData song objects.
+// Overlays the active setlist's plays onto the shared libraryData song objects,
+// and resets plays=1 for songs not in this setlist so switching setlists never
+// bleeds one setlist's play counts into another.
 function applySetlistResponse(data) {
   if (!data || !Array.isArray(data.entries)) return;
+  const inNewSet = new Set(data.entries.map(e => e.song_id));
+  libraryData.forEach(s => { if (!inNewSet.has(s.id)) s.plays = 1; });
   _currentSetlistId = data.setlist_id || _currentSetlistId;
   _setlistSettings  = data.settings  || null;
   setListIds = data.entries.map(e => e.song_id);
