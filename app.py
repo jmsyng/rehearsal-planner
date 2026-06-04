@@ -245,6 +245,16 @@ def api_add_tuning():
     return jsonify({"ok": True})
 
 
+@app.route("/api/tunings/<path:tuning>", methods=["DELETE"])
+@require_auth
+def api_delete_tuning(tuning):
+    tuning = urllib.parse.unquote(tuning)
+    deleted = db.delete_tuning(g.user_id, tuning)
+    if not deleted:
+        return jsonify({"error": "not found"}), 404
+    return jsonify({"ok": True})
+
+
 # ── Initial Songs (seeding for new users) ─────────────────────────────────────
 
 @app.route("/api/initial-songs")
