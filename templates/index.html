@@ -489,6 +489,20 @@
     .toolbar-select:hover,
     .toolbar-toggle:hover { border-color: var(--accent); }
 
+    .toolbar-btn {
+      font-family: inherit;
+      font-size: 14px;
+      color: var(--text-dim);
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 4px 7px;
+      cursor: pointer;
+      line-height: 1;
+      transition: border-color 0.15s, color 0.15s;
+    }
+    .toolbar-btn:hover { border-color: var(--accent); color: var(--accent); }
+
     .toolbar-select:focus,
     .toolbar-toggle:focus-visible { outline: none; border-color: var(--accent); }
 
@@ -1816,6 +1830,69 @@
   </div>
 </div>
 
+<div id="timing-settings-modal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,.7); z-index:1500; flex-direction:column; align-items:center; justify-content:center; padding:20px;">
+  <div style="background:var(--surface); border:1px solid var(--border); border-radius:var(--radius); padding:24px; max-width:420px; width:100%; max-height:90vh; overflow-y:auto;">
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
+      <h2 style="margin:0; font-size:18px;">Set List Timing</h2>
+      <button onclick="document.getElementById('timing-settings-modal').style.display='none'" style="background:none; border:none; font-size:24px; cursor:pointer; color:var(--text-dim); padding:0; width:30px; height:30px; display:flex; align-items:center; justify-content:center; line-height:1;">×</button>
+    </div>
+
+    <div class="settings-section">
+      <h3>Target length</h3>
+      <div style="display:flex; align-items:center; gap:10px;">
+        <input id="timing-target-min" type="number" class="settings-input" min="10" max="480" step="5" style="width:90px; flex:none;" oninput="onTimingInput()" />
+        <span style="font-size:13px; color:var(--text-dim);">minutes</span>
+        <span id="timing-target-fmt" style="font-size:13px; font-weight:600; color:var(--text-dim); margin-left:auto;"></span>
+      </div>
+      <p style="font-size:11px; color:var(--text-dim); margin-top:6px;">Set list turns red when total estimated time reaches this.</p>
+    </div>
+
+    <div class="settings-section">
+      <h3>Warn at</h3>
+      <div style="display:flex; align-items:center; gap:10px;">
+        <input id="timing-warn-min" type="number" class="settings-input" min="5" max="480" step="5" style="width:90px; flex:none;" oninput="onTimingInput()" />
+        <span style="font-size:13px; color:var(--text-dim);">minutes</span>
+        <span id="timing-warn-fmt" style="font-size:13px; font-weight:600; color:var(--text-dim); margin-left:auto;"></span>
+      </div>
+      <p style="font-size:11px; color:var(--text-dim); margin-top:6px;">Set list turns yellow when total reaches this. Must be less than target.</p>
+    </div>
+
+    <div class="settings-section">
+      <h3>Per-song buffer</h3>
+      <div style="display:flex; align-items:center; gap:12px;">
+        <input id="timing-buffer-s" type="range" min="0" max="300" step="5" style="flex:1;" oninput="onTimingInput()" />
+        <span id="timing-buffer-val" style="font-size:13px; font-weight:600; min-width:40px; text-align:right;">45s</span>
+      </div>
+      <p style="font-size:11px; color:var(--text-dim); margin-top:6px;">Added per play — accounts for banter, false starts, and mid-song retuning.</p>
+    </div>
+
+    <div class="settings-section">
+      <h3>Tuning-change time</h3>
+      <div style="display:flex; align-items:center; gap:12px;">
+        <input id="timing-tuning-s" type="range" min="0" max="180" step="15" style="flex:1;" oninput="onTimingInput()" />
+        <span id="timing-tuning-val" style="font-size:13px; font-weight:600; min-width:40px; text-align:right;">60s</span>
+      </div>
+      <p style="font-size:11px; color:var(--text-dim); margin-top:6px;">Added each time the tuning changes between consecutive songs.</p>
+    </div>
+
+    <div class="settings-section">
+      <h3>Breaks</h3>
+      <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+        <input id="timing-break-count" type="number" class="settings-input" min="0" max="9" step="1" style="width:60px; flex:none;" oninput="onTimingInput()" />
+        <span style="font-size:13px; color:var(--text-dim);">break(s) of</span>
+        <input id="timing-break-min" type="number" class="settings-input" min="0" max="120" step="5" style="width:70px; flex:none;" oninput="onTimingInput()" />
+        <span style="font-size:13px; color:var(--text-dim);">min each</span>
+      </div>
+      <p id="timing-break-help" style="font-size:11px; color:var(--text-dim); margin-top:6px;"></p>
+    </div>
+
+    <div style="display:flex; gap:10px; margin-top:8px;">
+      <button class="settings-btn" onclick="saveTimingSettings()">Save</button>
+      <button class="settings-btn ghost" onclick="resetTimingSettings()">Reset to defaults</button>
+    </div>
+  </div>
+</div>
+
 <style>
   /* ── App menu + settings UI ──────────────────────────────────────────── */
   .app-menu-item {
@@ -2031,6 +2108,7 @@
           <option value="">No grouping</option>
           <option value="tuning">Group by tuning</option>
         </select>
+        <button class="toolbar-btn" id="timing-settings-btn" onclick="openTimingSettingsModal()" title="Timing settings" aria-label="Timing settings">⏱</button>
       </div>
       <span class="spacer"></span>
       <span class="count" id="setlist-count">0 songs</span>
@@ -2358,6 +2436,7 @@ function setBandChrome(hasBand) {
 
 // ── API Data Layer ────────────────────────────────────────────────────────────
 async function loadAppData() {
+  loadTimingSettings();   // restore persisted timing settings before first render
   const overlay = document.getElementById('loading-overlay');
   overlay.style.display = 'flex';
   try {
@@ -4090,6 +4169,88 @@ function resetToBandSetup() {
   renderSetList();
   setBandChrome(false);
   document.getElementById('band-setup-overlay').style.display = 'flex';
+}
+
+// ── Timing Settings Modal ─────────────────────────────────────────────────────
+
+function loadTimingSettings() {
+  try {
+    const raw = localStorage.getItem('rp_setlist_settings');
+    if (raw) _setlistSettings = JSON.parse(raw);
+  } catch {}
+}
+
+function _populateTimingInputs(cfg) {
+  document.getElementById('timing-target-min').value  = Math.round(cfg.target_seconds / 60);
+  document.getElementById('timing-warn-min').value    = Math.round(cfg.warn_seconds / 60);
+  document.getElementById('timing-buffer-s').value   = cfg.song_buffer_seconds;
+  document.getElementById('timing-tuning-s').value   = cfg.tuning_change_seconds;
+  document.getElementById('timing-break-count').value = cfg.break_count;
+  document.getElementById('timing-break-min').value  = Math.round((cfg.break_seconds || 0) / 60);
+  _refreshTimingReadouts(cfg);
+}
+
+function _refreshTimingReadouts(cfg) {
+  const targetMin  = Number(document.getElementById('timing-target-min').value) || 0;
+  const warnMin    = Number(document.getElementById('timing-warn-min').value)   || 0;
+  const bufferS    = Number(document.getElementById('timing-buffer-s').value)   || 0;
+  const tuningS    = Number(document.getElementById('timing-tuning-s').value)   || 0;
+  const breakCount = Number(document.getElementById('timing-break-count').value) || 0;
+  const breakMin   = Number(document.getElementById('timing-break-min').value)  || 0;
+
+  document.getElementById('timing-target-fmt').textContent = formatBudget(targetMin * 60);
+  document.getElementById('timing-warn-fmt').textContent   = formatBudget(warnMin * 60);
+  document.getElementById('timing-buffer-val').textContent = bufferS + 's';
+  document.getElementById('timing-tuning-val').textContent = tuningS + 's';
+
+  const totalBreak = breakCount * breakMin;
+  document.getElementById('timing-break-help').textContent = breakCount > 0
+    ? `${breakCount} break${breakCount !== 1 ? 's' : ''} × ${breakMin} min = ${totalBreak} min total`
+    : 'No breaks.';
+}
+
+function onTimingInput() {
+  _refreshTimingReadouts();
+}
+
+function openTimingSettingsModal() {
+  const cfg = _setlistSettings || REHEARSAL_DEFAULTS;
+  _populateTimingInputs(cfg);
+  document.getElementById('timing-settings-modal').style.display = 'flex';
+}
+
+function saveTimingSettings() {
+  const targetMin  = Number(document.getElementById('timing-target-min').value);
+  const warnMin    = Number(document.getElementById('timing-warn-min').value);
+  const bufferS    = Number(document.getElementById('timing-buffer-s').value);
+  const tuningS    = Number(document.getElementById('timing-tuning-s').value);
+  const breakCount = Number(document.getElementById('timing-break-count').value);
+  const breakMin   = Number(document.getElementById('timing-break-min').value);
+
+  if (targetMin < 10) { showToast('Target must be at least 10 minutes'); return; }
+  if (warnMin >= targetMin) { showToast('Warn threshold must be less than target'); return; }
+  if (warnMin < 1)   { showToast('Warn threshold must be at least 1 minute'); return; }
+
+  _setlistSettings = {
+    target_seconds:       targetMin  * 60,
+    warn_seconds:         warnMin    * 60,
+    song_buffer_seconds:  bufferS,
+    tuning_change_seconds: tuningS,
+    break_count:          breakCount,
+    break_seconds:        breakMin   * 60,
+  };
+  localStorage.setItem('rp_setlist_settings', JSON.stringify(_setlistSettings));
+  updateTimeBar();
+  document.getElementById('timing-settings-modal').style.display = 'none';
+  showToast('✓ Timing settings saved');
+}
+
+function resetTimingSettings() {
+  localStorage.removeItem('rp_setlist_settings');
+  _setlistSettings = null;
+  _populateTimingInputs(REHEARSAL_DEFAULTS);
+  updateTimeBar();
+  showToast('✓ Reset to defaults');
 }
 
 // ── My Settings Modal ────────────────────────────────────────────────────────────
