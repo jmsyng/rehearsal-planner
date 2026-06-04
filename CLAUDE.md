@@ -657,6 +657,23 @@ showing "5/25 · need 15" — confirming size-independence. No console errors.
 **State at session end:** All changes local only (not committed, not deployed). Migration 002
 applied to the local/connected Neon DB only.
 
+### Session: Tuning Deletion (2026-06-04)
+
+Added the ability to delete custom tunings, and fixed a pre-existing bug where adding a tuning didn't update the Set List panel.
+
+**Backend (`db.py`, `app.py`):**
+- `delete_tuning(user_id, tuning)` — refuses silently for the 4 hardcoded defaults, deletes from `user_tunings`, returns `bool` indicating whether a row was deleted.
+- `DELETE /api/tunings/<path:tuning>` (`@require_auth`) — URL-decodes the path segment via `urllib.parse.unquote`, returns `{"ok": true}` or 404. Uses `<path:tuning>` to handle slashes safely.
+
+**Frontend (`templates/index.html`):**
+- Added `const DEFAULT_TUNINGS` at script top-level (same scope as `allTuningValues`) — used by `renderSettingsTunings` to gate the × button.
+- `renderSettingsTunings` now builds pills with `display:inline-flex` and appends a `×` button (calls `deleteTuning(t)`) for any tuning not in `DEFAULT_TUNINGS`. Default tunings get no button.
+- `deleteTuning(tuning)` — DELETEs via `apiFetch`, splices `allTuningValues`, calls `renderSettingsTunings()` + `renderLibrary()` + `renderSetList()`, shows toast.
+
+**Bug fix — Set List tuning dropdowns staying stale:** `renderSetList()` was never called after tuning add/remove, so the tuning dropdowns in expanded setlist song cards didn't include newly-added tunings. Fixed in three places: `addTuningFromSettings()`, `deleteTuning()`, and the inline "Add tuning" button inside expanded song cards (`makeSongCard`).
+
+**Branch:** `claude/tuning-deletion-sC4jh` — committed and pushed, not yet merged to `main`.
+
 ## Maintenance Pattern for This File
 
 When future sessions do meaningful work in this project, ask Claude:
