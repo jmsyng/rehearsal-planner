@@ -2831,6 +2831,14 @@ function makeSongCard(song, inSetList) {
     saveBtn.textContent = 'Save';
     saveBtn.addEventListener('click', e => {
       e.stopPropagation();
+      // Patch the live libraryData entry in case pollNotifications replaced it
+      // since this card was rendered (which would make `song` a stale reference).
+      const live = libraryData.find(s => s.id === song.id);
+      if (live && live !== song) {
+        live.extra.OurTuning = song.extra.OurTuning;
+        live.extra.RecordedTuning = song.extra.RecordedTuning;
+        if (song.extra.songStatus !== undefined) live.extra.songStatus = song.extra.songStatus;
+      }
       apiUpdateSong(song);
       showToast('Changes saved');
       expandedSongId = null;

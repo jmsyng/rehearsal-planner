@@ -182,7 +182,8 @@ def api_add_song():
 def api_update_song(song_id):
     song = request.get_json(force=True)
     song["id"] = song_id
-    saved = db.upsert_song(g.user_id, song)
+    band = db.get_user_band(g.user_id)
+    saved = db.upsert_song(g.user_id, song, band_id=band["id"] if band else None)
     return jsonify(saved)
 
 
