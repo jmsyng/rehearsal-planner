@@ -413,6 +413,15 @@
         border-top: 1px solid var(--border);
       }
 
+      /* Keep the time pane compact and pinned at the bottom of the set list on mobile. */
+      .time-bar-wrapper {
+        padding: 10px 14px;
+        position: sticky;
+        bottom: 0;
+      }
+      .time-total { font-size: 22px; }
+      .time-display { margin-bottom: 8px; }
+
     }
 
     .panel {
@@ -973,6 +982,39 @@
       margin-top: 6px;
       font-size: 11px;
       color: var(--text-dim);
+    }
+
+    .time-breakdown {
+      margin-left: auto;
+      font-size: 12px;
+      color: var(--text-dim);
+      white-space: nowrap;
+      font-variant-numeric: tabular-nums;
+    }
+    .progress-warn-tick {
+      position: absolute;
+      top: -1px;
+      bottom: -1px;
+      width: 2px;
+      background: var(--text-dim);
+      opacity: .55;
+      z-index: 1;
+    }
+    .tuning-breakdown {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-top: 8px;
+    }
+    .tuning-breakdown:empty { display: none; }
+    .tuning-chip {
+      font-size: 11px;
+      padding: 2px 8px;
+      border-radius: 10px;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      color: var(--text-dim);
+      font-variant-numeric: tabular-nums;
     }
 
     .empty-state {
@@ -2003,22 +2045,34 @@
       <div class="time-display">
         <span class="time-total ok" id="time-total">0:00</span>
         <span class="time-label">total rehearsal time</span>
+        <span class="time-breakdown" id="time-breakdown"></span>
       </div>
       <div class="progress-track">
         <div class="progress-fill ok" id="progress-fill" style="width:0%"></div>
+        <div class="progress-warn-tick" id="progress-warn-tick" style="left:80%"></div>
       </div>
       <div class="threshold-markers">
         <span>0:00</span>
-        <span>⚠️ 2h00</span>
-        <span>🛑 2h30</span>
+        <span id="marker-warn">⚠️ 2h00</span>
+        <span id="marker-target">🛑 2h30</span>
       </div>
+      <div class="tuning-breakdown" id="tuning-breakdown"></div>
     </div>
   </div>
 </div>
 
 <script>
-const THRESHOLD_WARN = 2 * 3600;       // 2h00 in seconds
-const THRESHOLD_MAX  = 2.5 * 3600;    // 2h30 in seconds
+// Rehearsal-time settings. These are sensible defaults; Phase B will make them
+// editable per set list (with band-level defaults) and populate _setlistSettings.
+const REHEARSAL_DEFAULTS = {
+  target_seconds: 2.5 * 3600,   // 2h30 — hard limit (red)
+  warn_seconds:   2 * 3600,     // 2h00 — warning (yellow)
+  song_buffer_seconds: 45,      // padding added per play (banter, false starts, etc.)
+  tuning_change_seconds: 60,    // added each time the tuning changes between songs
+  break_count: 0,
+  break_seconds: 0,
+};
+let _setlistSettings = null;    // active set list's settings; null → REHEARSAL_DEFAULTS
 
 // 5-point Likert voting scale
 const LIKERT_VOTES = [
@@ -3096,7 +3150,7 @@ function renderSetList() {
     ? `${songs.length} of ${totalCount} songs`
     : `${totalCount} song${totalCount !== 1 ? 's' : ''}`;
   document.getElementById('setlist-count').textContent = countText;
-  updateTimeBar(songs);
+  updateTimeBar();
 
   Sortable.create(list, {
     group: { name: 'songs', pull: true, put: true },
@@ -3141,9 +3195,8 @@ function changePlays(id, delta) {
   });
   apiUpdateSong(song);
   saveSetlistDebounced();
-  // Re-calculate time bar
-  const songs = setListIds.map(songById).filter(Boolean);
-  updateTimeBar(songs);
+  // Re-calculate time bar (computes over the full set list internally)
+  updateTimeBar();
 }
 
 // ── Time parsing & formatting ────────────────────────────────────────────────
@@ -3157,32 +3210,88 @@ function parse_duration(s) {
   return 0;
 }
 
-function roundToNearest30s(seconds) {
-  return Math.ceil(seconds / 30) * 30;
-}
-
 function formatTime(seconds) {
   const h = Math.floor(seconds / 3600);
   const m = Math.floor((seconds % 3600) / 60);
-  const s = seconds % 60;
+  const s = Math.round(seconds % 60);
   return h > 0
     ? `${h}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`
     : `${m}:${String(s).padStart(2,'0')}`;
 }
 
-function updateTimeBar(songs) {
-  const total = songs.reduce((acc, s) => acc + roundToNearest30s(s.duration_seconds) * s.plays, 0);
-  const pct = Math.min(100, (total / THRESHOLD_MAX) * 100);
+// Compact budget label for threshold markers, e.g. 9000 → "2h30", 6300 → "1h45", 2700 → "45m".
+function formatBudget(seconds) {
+  const h = Math.floor(seconds / 3600);
+  const m = Math.round((seconds % 3600) / 60);
+  return h > 0 ? `${h}h${String(m).padStart(2,'0')}` : `${m}m`;
+}
 
-  const cls = total >= THRESHOLD_MAX ? 'over' : total >= THRESHOLD_WARN ? 'warn' : 'ok';
+// Tuning of a song for grouping / change-counting (mirrors groupSetListByTuning).
+function tuningOfSong(s) {
+  return (s && (s.extra?.OurTuning || s.extra?.Tuning)) || '';
+}
+
+// Recompute the rehearsal-time pane from the FULL ordered set list (never the
+// search-filtered subset). Total = breaks + Σ(duration + per-song buffer)×plays
+// + (number of tuning changes between consecutive songs) × tuning-change time.
+function updateTimeBar() {
+  const cfg = _setlistSettings || REHEARSAL_DEFAULTS;
+  const songs = setListIds.map(songById).filter(Boolean);
+
+  // Per-song time includes a fixed buffer per play (banter, false starts, retunes mid-song).
+  const songTotal = songs.reduce(
+    (acc, s) => acc + (s.duration_seconds + cfg.song_buffer_seconds) * s.plays, 0);
+
+  // Tuning changes: count transitions where a song's tuning differs from the previous
+  // song's. Repeated plays of one song stay in the same tuning, so we compare song-to-song
+  // (not expanded by plays) — repeats add no extra change.
+  let changes = 0;
+  for (let i = 1; i < songs.length; i++) {
+    if (tuningOfSong(songs[i]) !== tuningOfSong(songs[i - 1])) changes++;
+  }
+
+  const breaks = (cfg.break_count || 0) * (cfg.break_seconds || 0);
+  const total  = breaks + songTotal + changes * cfg.tuning_change_seconds;
+
+  const target = cfg.target_seconds || 1;  // guard divide-by-zero
+  const pct = Math.min(100, (total / target) * 100);
+  const cls = total >= target ? 'over' : total >= cfg.warn_seconds ? 'warn' : 'ok';
 
   const totalEl = document.getElementById('time-total');
   const fillEl  = document.getElementById('progress-fill');
-
   totalEl.textContent = formatTime(total);
   totalEl.className = `time-total ${cls}`;
   fillEl.style.width = pct + '%';
   fillEl.className = `progress-fill ${cls}`;
+
+  // Threshold markers + warn tick, driven by the configured warn/target.
+  document.getElementById('marker-warn').textContent   = `⚠️ ${formatBudget(cfg.warn_seconds)}`;
+  document.getElementById('marker-target').textContent = `🛑 ${formatBudget(cfg.target_seconds)}`;
+  document.getElementById('progress-warn-tick').style.left =
+    Math.min(100, (cfg.warn_seconds / target) * 100) + '%';
+
+  // Breakdown: song count + total plays.
+  const totalPlays = songs.reduce((acc, s) => acc + s.plays, 0);
+  document.getElementById('time-breakdown').textContent = songs.length
+    ? `${songs.length} song${songs.length !== 1 ? 's' : ''} · ${totalPlays} play${totalPlays !== 1 ? 's' : ''}`
+    : '';
+
+  // Per-tuning breakdown chips (time per tuning group) — only when more than one tuning.
+  const perTuning = new Map();
+  songs.forEach(s => {
+    const key = tuningOfSong(s) || '—';
+    perTuning.set(key, (perTuning.get(key) || 0) + (s.duration_seconds + cfg.song_buffer_seconds) * s.plays);
+  });
+  const tb = document.getElementById('tuning-breakdown');
+  tb.innerHTML = '';
+  if (perTuning.size > 1) {
+    perTuning.forEach((secs, key) => {
+      const chip = document.createElement('span');
+      chip.className = 'tuning-chip';
+      chip.textContent = `${key} ${formatTime(secs)}`;
+      tb.appendChild(chip);
+    });
+  }
 }
 
 // ── Status ────────────────────────────────────────────────────────────────────
