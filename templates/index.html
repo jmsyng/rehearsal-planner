@@ -1761,6 +1761,33 @@
       <p id="approval-factor-help" style="font-size:11px; color:var(--text-dim); margin-top:6px;"></p>
     </div>
 
+    <!-- Default timing for new set lists -->
+    <div class="settings-section">
+      <h3>Default timing (for new set lists)</h3>
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px 16px; margin-bottom:4px;">
+        <label style="font-size:12px; color:var(--text-dim);">Target (min)
+          <input id="band-timing-target" type="number" class="settings-input" min="10" max="480" step="5" style="margin-top:4px;" />
+        </label>
+        <label style="font-size:12px; color:var(--text-dim);">Warn at (min)
+          <input id="band-timing-warn" type="number" class="settings-input" min="5" max="480" step="5" style="margin-top:4px;" />
+        </label>
+        <label style="font-size:12px; color:var(--text-dim);">Song buffer (s)
+          <input id="band-timing-buffer" type="number" class="settings-input" min="0" max="300" step="5" style="margin-top:4px;" />
+        </label>
+        <label style="font-size:12px; color:var(--text-dim);">Tuning change (s)
+          <input id="band-timing-tuning" type="number" class="settings-input" min="0" max="180" step="15" style="margin-top:4px;" />
+        </label>
+        <label style="font-size:12px; color:var(--text-dim);">Breaks
+          <input id="band-timing-breaks" type="number" class="settings-input" min="0" max="9" step="1" style="margin-top:4px;" placeholder="count" />
+        </label>
+        <label style="font-size:12px; color:var(--text-dim);">Break length (min)
+          <input id="band-timing-break-min" type="number" class="settings-input" min="0" max="120" step="5" style="margin-top:4px;" />
+        </label>
+      </div>
+      <p style="font-size:11px; color:var(--text-dim); margin-top:6px;">Applied when a new set list is created. Existing set lists are not affected.</p>
+      <button class="settings-btn ghost" style="margin-top:10px;" onclick="saveBandTimingDefaults()">Save defaults</button>
+    </div>
+
     <!-- Danger zone -->
     <div class="settings-section" id="band-danger-zone" style="display:none;">
       <h3 style="color:var(--red);">Danger zone</h3>
@@ -1833,8 +1860,16 @@
 <div id="timing-settings-modal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,.7); z-index:1500; flex-direction:column; align-items:center; justify-content:center; padding:20px;">
   <div style="background:var(--surface); border:1px solid var(--border); border-radius:var(--radius); padding:24px; max-width:420px; width:100%; max-height:90vh; overflow-y:auto;">
     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
-      <h2 style="margin:0; font-size:18px;">Set List Timing</h2>
+      <h2 style="margin:0; font-size:18px;">Set List Settings</h2>
       <button onclick="document.getElementById('timing-settings-modal').style.display='none'" style="background:none; border:none; font-size:24px; cursor:pointer; color:var(--text-dim); padding:0; width:30px; height:30px; display:flex; align-items:center; justify-content:center; line-height:1;">×</button>
+    </div>
+
+    <div class="settings-section">
+      <h3>Set list name</h3>
+      <div style="display:flex; gap:8px;">
+        <input id="timing-setlist-name" class="settings-input" style="flex:1;" placeholder="e.g. Headliner" />
+        <button class="settings-btn ghost" onclick="renameCurrentSetlist()">Rename</button>
+      </div>
     </div>
 
     <div class="settings-section">
@@ -1889,6 +1924,12 @@
     <div style="display:flex; gap:10px; margin-top:8px;">
       <button class="settings-btn" onclick="saveTimingSettings()">Save</button>
       <button class="settings-btn ghost" onclick="resetTimingSettings()">Reset to defaults</button>
+    </div>
+
+    <div class="settings-section" id="timing-danger-zone" style="margin-top:20px; border-top:1px solid var(--border); padding-top:16px;">
+      <h3 style="color:var(--red);">Danger zone</h3>
+      <button class="settings-btn danger" onclick="deleteCurrentSetlist()">Delete this set list</button>
+      <p id="timing-delete-note" style="font-size:11px; color:var(--text-dim); margin-top:6px;"></p>
     </div>
   </div>
 </div>
@@ -2104,6 +2145,8 @@
     <div class="panel-header">
       <h2>Set List</h2>
       <div class="panel-tools">
+        <select class="toolbar-select" id="setlist-switcher" aria-label="Switch set list" onchange="switchSetlist(this.value)" style="max-width:120px;"></select>
+        <button class="toolbar-btn" id="setlist-new-btn" onclick="promptCreateSetlist()" title="New set list" aria-label="New set list">＋</button>
         <select class="toolbar-select" id="set-group-by" title="Group set list" aria-label="Group set list">
           <option value="">No grouping</option>
           <option value="tuning">Group by tuning</option>
@@ -2166,6 +2209,8 @@ const LIKERT_EMOJI      = { '5': '❤️', '4': '👍', '3': '😐', '2': '👎'
 
 let libraryData = [];   // [{id, name, duration_raw, duration_seconds, plays, extra}]
 let setListIds  = [];   // ordered list of ids currently in the set list
+let _currentSetlistId = null;   // active setlist UUID
+let _setlists = [];             // [{id, name, is_default, settings}] for the switcher
 let librarySearchText = '';  // tracks search text in library
 let setListSearchText = '';  // tracks search text in set list
 let expandedSongId = null;  // tracks which song card is currently expanded
@@ -2435,27 +2480,87 @@ function setBandChrome(hasBand) {
 }
 
 // ── API Data Layer ────────────────────────────────────────────────────────────
+
+// Apply the new GET /api/setlist response shape: {setlist_id, settings, entries}.
+// Overlays the active setlist's plays onto the shared libraryData song objects.
+function applySetlistResponse(data) {
+  if (!data || !Array.isArray(data.entries)) return;
+  _currentSetlistId = data.setlist_id || _currentSetlistId;
+  _setlistSettings  = data.settings  || null;
+  setListIds = data.entries.map(e => e.song_id);
+  data.entries.forEach(e => {
+    const s = songById(e.song_id);
+    if (s) s.plays = e.plays;
+  });
+  // Persist active setlist choice across reloads (keyed by owner).
+  const ownerKey = (_bandData?.id || _currentUserId || 'solo');
+  if (_currentSetlistId) {
+    try { localStorage.setItem(`rp_setlist_${ownerKey}`, _currentSetlistId); } catch {}
+  }
+}
+
+function renderSetlistSwitcher() {
+  const sel = document.getElementById('setlist-switcher');
+  if (!sel) return;
+  sel.innerHTML = '';
+  _setlists.forEach(sl => {
+    const opt = document.createElement('option');
+    opt.value = sl.id;
+    opt.textContent = sl.name;
+    if (sl.id === _currentSetlistId) opt.selected = true;
+    sel.appendChild(opt);
+  });
+}
+
+async function switchSetlist(id) {
+  if (id === _currentSetlistId) return;
+  const res = await apiFetch(`/api/setlist?setlist_id=${encodeURIComponent(id)}`);
+  if (!res.ok) { showToast('Failed to switch set list'); return; }
+  applySetlistResponse(await res.json());
+  renderSetlistSwitcher();
+  renderSetList();
+  renderLibrary();
+}
+
+async function loadActiveSetlist() {
+  // Restore last-used setlist id from localStorage, falling back to default.
+  const ownerKey = (_bandData?.id || _currentUserId || 'solo');
+  let storedId = null;
+  try { storedId = localStorage.getItem(`rp_setlist_${ownerKey}`); } catch {}
+  const inList = storedId && _setlists.some(sl => sl.id === storedId);
+  const target = inList ? storedId : (_setlists[0]?.id || null);
+  const url = target ? `/api/setlist?setlist_id=${encodeURIComponent(target)}` : '/api/setlist';
+  const res = await apiFetch(url);
+  if (res.ok) applySetlistResponse(await res.json());
+}
+
 async function loadAppData() {
-  loadTimingSettings();   // restore persisted timing settings before first render
   const overlay = document.getElementById('loading-overlay');
   overlay.style.display = 'flex';
   try {
-    const [songsRes, setlistRes, tuningsRes] = await Promise.all([
+    const [songsRes, setlistsRes, setlistRes, tuningsRes] = await Promise.all([
       apiFetch('/api/songs'),
+      apiFetch('/api/setlists'),
       apiFetch('/api/setlist'),
       apiFetch('/api/tunings'),
     ]);
     if (songsRes.status === 401) { signOut(); return; }
 
     libraryData     = await songsRes.json();
-    setListIds      = await setlistRes.json();
+    _setlists       = setlistsRes.ok ? await setlistsRes.json() : [];
     allTuningValues = await tuningsRes.json();
+
+    // Apply the setlist — but if we have a stored preference, load that instead.
+    const defaultData = await setlistRes.json();
+    applySetlistResponse(defaultData);
+    await loadActiveSetlist();   // may switch to stored preference
 
     if (libraryData.length === 0) {
       const seedRes = await apiFetch('/api/initial-songs');
       if (seedRes.ok) libraryData = await seedRes.json();
     }
 
+    renderSetlistSwitcher();
     renderLibrary();
     renderSetList();
     fetchAllAlbumArt();
@@ -2505,7 +2610,7 @@ async function apiSaveSetlist() {
   });
   apiFetch('/api/setlist', {
     method: 'POST',
-    body: JSON.stringify(entries),
+    body: JSON.stringify({ setlist_id: _currentSetlistId, entries }),
   }).catch(() => showToast('Failed to save set list'));
 }
 
@@ -2800,14 +2905,14 @@ function makeSongCard(song, inSetList) {
             if (songsRes.ok) {
               libraryData = await songsRes.json();
               const slRes = await apiFetch('/api/setlist');
-              if (slRes.ok) setListIds = await slRes.json();
+              if (slRes.ok) applySetlistResponse(await slRes.json());
             }
           } else if (result.status === 'approved' && song.extra.proposalStatus === 'pending') {
             const songsRes = await apiFetch('/api/songs');
             if (songsRes.ok) {
               libraryData = await songsRes.json();
               const slRes = await apiFetch('/api/setlist');
-              if (slRes.ok) setListIds = await slRes.json();
+              if (slRes.ok) applySetlistResponse(await slRes.json());
             }
           }
           renderLibrary(); renderSetList();
@@ -3986,9 +4091,37 @@ function openBandSettingsModal() {
   document.getElementById('approval-factor-value').textContent = factor;
   updateApprovalHelp(factor);
 
+  // Populate band timing defaults.
+  const td = _bandData.time_defaults || {};
+  document.getElementById('band-timing-target').value    = Math.round((td.target_seconds   || 9000) / 60);
+  document.getElementById('band-timing-warn').value      = Math.round((td.warn_seconds     || 7200) / 60);
+  document.getElementById('band-timing-buffer').value    = td.song_buffer_seconds   ?? 45;
+  document.getElementById('band-timing-tuning').value    = td.tuning_change_seconds ?? 60;
+  document.getElementById('band-timing-breaks').value    = td.break_count           ?? 0;
+  document.getElementById('band-timing-break-min').value = Math.round((td.break_seconds || 0) / 60);
+
   document.getElementById('band-danger-zone').style.display = isAdmin ? 'block' : 'none';
   document.getElementById('band-leave-error').style.display = 'none';
   document.getElementById('band-info-modal').style.display = 'flex';
+}
+
+async function saveBandTimingDefaults() {
+  const defaults = {
+    target_seconds:        Number(document.getElementById('band-timing-target').value) * 60,
+    warn_seconds:          Number(document.getElementById('band-timing-warn').value)   * 60,
+    song_buffer_seconds:   Number(document.getElementById('band-timing-buffer').value),
+    tuning_change_seconds: Number(document.getElementById('band-timing-tuning').value),
+    break_count:           Number(document.getElementById('band-timing-breaks').value),
+    break_seconds:         Number(document.getElementById('band-timing-break-min').value) * 60,
+  };
+  try {
+    const res = await apiFetch('/api/band', { method: 'PATCH', body: JSON.stringify({ time_defaults: defaults }) });
+    if (!res.ok) throw new Error((await res.json()).error || 'Failed');
+    _bandData = await res.json();
+    showToast('✓ Default timing saved');
+  } catch (err) {
+    showToast(err.message || 'Failed to save defaults');
+  }
 }
 
 function renderBandMembers() {
@@ -4174,10 +4307,8 @@ function resetToBandSetup() {
 // ── Timing Settings Modal ─────────────────────────────────────────────────────
 
 function loadTimingSettings() {
-  try {
-    const raw = localStorage.getItem('rp_setlist_settings');
-    if (raw) _setlistSettings = JSON.parse(raw);
-  } catch {}
+  // Phase B: settings come from the API (applySetlistResponse). This is a no-op kept
+  // for backward-compat in case of cold-start before the setlist response arrives.
 }
 
 function _populateTimingInputs(cfg) {
@@ -4216,10 +4347,23 @@ function onTimingInput() {
 function openTimingSettingsModal() {
   const cfg = _setlistSettings || REHEARSAL_DEFAULTS;
   _populateTimingInputs(cfg);
+  // Populate name field.
+  const active = _setlists.find(sl => sl.id === _currentSetlistId);
+  document.getElementById('timing-setlist-name').value = active?.name || '';
+  // Danger zone: disable delete if only one setlist.
+  const deleteBtn = document.querySelector('#timing-danger-zone .settings-btn.danger');
+  const deleteNote = document.getElementById('timing-delete-note');
+  if (_setlists.length <= 1) {
+    if (deleteBtn) deleteBtn.disabled = true;
+    if (deleteNote) deleteNote.textContent = 'You must have at least one set list.';
+  } else {
+    if (deleteBtn) deleteBtn.disabled = false;
+    if (deleteNote) deleteNote.textContent = 'Permanently removes this set list and its song order.';
+  }
   document.getElementById('timing-settings-modal').style.display = 'flex';
 }
 
-function saveTimingSettings() {
+async function saveTimingSettings() {
   const targetMin  = Number(document.getElementById('timing-target-min').value);
   const warnMin    = Number(document.getElementById('timing-warn-min').value);
   const bufferS    = Number(document.getElementById('timing-buffer-s').value);
@@ -4231,26 +4375,98 @@ function saveTimingSettings() {
   if (warnMin >= targetMin) { showToast('Warn threshold must be less than target'); return; }
   if (warnMin < 1)   { showToast('Warn threshold must be at least 1 minute'); return; }
 
-  _setlistSettings = {
-    target_seconds:       targetMin  * 60,
-    warn_seconds:         warnMin    * 60,
-    song_buffer_seconds:  bufferS,
+  const settings = {
+    target_seconds:        targetMin  * 60,
+    warn_seconds:          warnMin    * 60,
+    song_buffer_seconds:   bufferS,
     tuning_change_seconds: tuningS,
-    break_count:          breakCount,
-    break_seconds:        breakMin   * 60,
+    break_count:           breakCount,
+    break_seconds:         breakMin   * 60,
   };
-  localStorage.setItem('rp_setlist_settings', JSON.stringify(_setlistSettings));
+
+  if (_currentSetlistId) {
+    const res = await apiFetch(`/api/setlists/${_currentSetlistId}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ settings }),
+    });
+    if (!res.ok) { showToast('Failed to save settings'); return; }
+    const updated = await res.json();
+    _setlistSettings = updated.settings;
+    const sl = _setlists.find(s => s.id === _currentSetlistId);
+    if (sl) sl.settings = updated.settings;
+  } else {
+    // Offline / pre-auth fallback (e.g. dev mode without a setlist yet).
+    _setlistSettings = settings;
+  }
   updateTimeBar();
   document.getElementById('timing-settings-modal').style.display = 'none';
-  showToast('✓ Timing settings saved');
+  showToast('✓ Settings saved');
 }
 
-function resetTimingSettings() {
-  localStorage.removeItem('rp_setlist_settings');
-  _setlistSettings = null;
-  _populateTimingInputs(REHEARSAL_DEFAULTS);
+async function resetTimingSettings() {
+  // Reset to band defaults (or REHEARSAL_DEFAULTS for solo).
+  const defaults = _bandData?.time_defaults || REHEARSAL_DEFAULTS;
+  if (_currentSetlistId) {
+    const res = await apiFetch(`/api/setlists/${_currentSetlistId}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ settings: defaults }),
+    });
+    if (!res.ok) { showToast('Failed to reset settings'); return; }
+    const updated = await res.json();
+    _setlistSettings = updated.settings;
+    const sl = _setlists.find(s => s.id === _currentSetlistId);
+    if (sl) sl.settings = updated.settings;
+    _populateTimingInputs(_setlistSettings);
+  } else {
+    _setlistSettings = null;
+    _populateTimingInputs(REHEARSAL_DEFAULTS);
+  }
   updateTimeBar();
   showToast('✓ Reset to defaults');
+}
+
+async function renameCurrentSetlist() {
+  const name = document.getElementById('timing-setlist-name').value.trim();
+  if (!name) { showToast('Name is required'); return; }
+  if (!_currentSetlistId) return;
+  const res = await apiFetch(`/api/setlists/${_currentSetlistId}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ name }),
+  });
+  if (!res.ok) { showToast('Failed to rename set list'); return; }
+  const sl = _setlists.find(s => s.id === _currentSetlistId);
+  if (sl) sl.name = name;
+  renderSetlistSwitcher();
+  showToast(`✓ Renamed to "${name}"`);
+}
+
+async function promptCreateSetlist() {
+  const name = prompt('New set list name:');
+  if (!name || !name.trim()) return;
+  const res = await apiFetch('/api/setlists', {
+    method: 'POST',
+    body: JSON.stringify({ name: name.trim() }),
+  });
+  if (!res.ok) { showToast('Failed to create set list'); return; }
+  const sl = await res.json();
+  _setlists.push(sl);
+  renderSetlistSwitcher();
+  await switchSetlist(sl.id);
+  showToast(`✓ Created "${sl.name}"`);
+}
+
+async function deleteCurrentSetlist() {
+  if (_setlists.length <= 1) { showToast('Cannot delete the last set list'); return; }
+  const active = _setlists.find(sl => sl.id === _currentSetlistId);
+  if (!confirm(`Delete "${active?.name || 'this set list'}"? This cannot be undone.`)) return;
+  const res = await apiFetch(`/api/setlists/${_currentSetlistId}`, { method: 'DELETE' });
+  if (!res.ok) { showToast('Failed to delete set list'); return; }
+  const { new_default_id } = await res.json();
+  _setlists = _setlists.filter(sl => sl.id !== _currentSetlistId);
+  document.getElementById('timing-settings-modal').style.display = 'none';
+  await switchSetlist(new_default_id);
+  renderSetlistSwitcher();
+  showToast('✓ Set list deleted');
 }
 
 // ── My Settings Modal ────────────────────────────────────────────────────────────
@@ -4607,7 +4823,7 @@ async function submitVote(proposalId, vote) {
     if (songsRes.ok) {
       libraryData = await songsRes.json();
       const setlistRes = await apiFetch('/api/setlist');
-      if (setlistRes.ok) setListIds = await setlistRes.json();
+      if (setlistRes.ok) applySetlistResponse(await setlistRes.json());
       renderLibrary();
       renderSetList();
     }
