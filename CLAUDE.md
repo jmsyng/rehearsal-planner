@@ -677,6 +677,29 @@ Added a "Sort By" control to the set list toolbar. **All in `templates/index.htm
 
 **No DB migration needed** — pure frontend change.
 
+### Session: Vote Submit Fix, Threshold Rework & Modal Polish (2026-06-04)
+
+**Bugs fixed:**
+
+- **"Failed to submit vote" (500 crash).** `cast_vote` triggered auto-add-to-setlist when a proposal crossed the approval threshold. Two helpers (`_default_setlist_id`, `_auto_add_to_setlist`) read results as `row[0]` (positional), but `cast_vote` opens a `RealDictCursor` — `KeyError: 0`. Fixed to read by column name. This was the root cause of the notification-bell vote failure.
+
+- **4-member band cap removed from `db.join_band`; sanity ceiling of 24 added.** Previous code hard-capped bands at 4 members. Now joins fail only if the band already has ≥ 24 members.
+
+**Scoring model updated (`db.py`, `schema.sql`, `templates/index.html`):**
+
+- `approval_factor` default raised from **3.0 → 3.25**. At 3.25 a 4-member band needs **13/20** to approve — meaning 4 Mehs (12) and 2 Love+2 Hard-no (12) both fall below the bar. Scales to other sizes: 2→7/10, 3→10/15, 5→17/25, 6→20/30.
+- Migration **003** (`migrations/003_approval_factor_3_25.sql`) updates existing bands still on 3.0 to 3.25. Bands with a custom value are left alone.
+- All JS fallback references updated from `?? 3.0` → `?? 3.25`. Band Settings slider default display updated to match.
+
+**Voting modal polish (`renderVotingCard`):**
+
+- **Score line** simplified to `Score: N (X pts to approve)` — no more fractions or "avg per member" phrasing.
+- **Legend** corrected: was `1 · Hard no … 5 · Love it` (reversed vs the buttons); now `5 · Love it … 1 · Hard no`.
+- **"Skip ›" → "Next ›"** on the queue navigation button.
+- **Members count** in Band Settings header now shows `Members (N/24)`.
+
+**Deployment:** committed and pushed to `main` in one commit (`7e1155a`). Migrations were already applied to Neon DB before push.
+
 ## Maintenance Pattern for This File
 
 When future sessions do meaningful work in this project, ask Claude:
