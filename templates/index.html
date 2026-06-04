@@ -4261,15 +4261,38 @@ async function saveProfile() {
   }
 }
 
+const DEFAULT_TUNINGS = ['E standard', 'Eb', 'Drop D', 'Drop C#'];
+
 function renderSettingsTunings() {
   const wrap = document.getElementById('settings-tunings-list');
   wrap.innerHTML = '';
   (allTuningValues || []).forEach(t => {
     const pill = document.createElement('span');
-    pill.style.cssText = 'font-size:12px; padding:5px 12px; border-radius:16px; border:1px solid var(--border); background:var(--bg); color:var(--text);';
+    pill.style.cssText = 'font-size:12px; padding:5px 12px; border-radius:16px; border:1px solid var(--border); background:var(--bg); color:var(--text); display:inline-flex; align-items:center; gap:6px;';
     pill.textContent = t;
+    if (!DEFAULT_TUNINGS.includes(t)) {
+      const btn = document.createElement('button');
+      btn.textContent = '×';
+      btn.title = 'Remove tuning';
+      btn.style.cssText = 'background:none; border:none; cursor:pointer; color:var(--text-dim); font-size:14px; line-height:1; padding:0; margin:0;';
+      btn.onclick = () => deleteTuning(t);
+      pill.appendChild(btn);
+    }
     wrap.appendChild(pill);
   });
+}
+async function deleteTuning(tuning) {
+  try {
+    const res = await apiFetch('/api/tunings/' + encodeURIComponent(tuning), { method: 'DELETE' });
+    if (!res.ok) throw new Error('Failed');
+    const idx = allTuningValues.indexOf(tuning);
+    if (idx !== -1) allTuningValues.splice(idx, 1);
+    renderSettingsTunings();
+    renderLibrary();
+    showToast('✓ Tuning removed');
+  } catch (err) {
+    showToast('Failed to remove tuning');
+  }
 }
 async function addTuningFromSettings() {
   const input = document.getElementById('settings-tuning-add');
