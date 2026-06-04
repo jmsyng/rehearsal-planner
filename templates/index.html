@@ -414,6 +414,15 @@
         border-top: 1px solid var(--border);
       }
 
+      /* Keep the time pane compact and pinned at the bottom of the set list on mobile. */
+      .time-bar-wrapper {
+        padding: 10px 14px;
+        position: sticky;
+        bottom: 0;
+      }
+      .time-total { font-size: 22px; }
+      .time-display { margin-bottom: 8px; }
+
     }
 
     .panel {
@@ -480,6 +489,20 @@
 
     .toolbar-select:hover,
     .toolbar-toggle:hover { border-color: var(--accent); }
+
+    .toolbar-btn {
+      font-family: inherit;
+      font-size: 14px;
+      color: var(--text-dim);
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 4px 7px;
+      cursor: pointer;
+      line-height: 1;
+      transition: border-color 0.15s, color 0.15s;
+    }
+    .toolbar-btn:hover { border-color: var(--accent); color: var(--accent); }
 
     .toolbar-select:focus,
     .toolbar-toggle:focus-visible { outline: none; border-color: var(--accent); }
@@ -890,6 +913,12 @@
       gap: 6px;
       flex-shrink: 0;
     }
+    .plays-label {
+      font-size: 12px;
+      color: var(--text-dim);
+      flex-shrink: 0;
+      line-height: 1;
+    }
     .plays-control button {
       background: var(--bg);
       border: 1px solid var(--border);
@@ -997,6 +1026,39 @@
       margin-top: 6px;
       font-size: 11px;
       color: var(--text-dim);
+    }
+
+    .time-breakdown {
+      margin-left: auto;
+      font-size: 12px;
+      color: var(--text-dim);
+      white-space: nowrap;
+      font-variant-numeric: tabular-nums;
+    }
+    .progress-warn-tick {
+      position: absolute;
+      top: -1px;
+      bottom: -1px;
+      width: 2px;
+      background: var(--text-dim);
+      opacity: .55;
+      z-index: 1;
+    }
+    .tuning-breakdown {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-top: 8px;
+    }
+    .tuning-breakdown:empty { display: none; }
+    .tuning-chip {
+      font-size: 11px;
+      padding: 2px 8px;
+      border-radius: 10px;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      color: var(--text-dim);
+      font-variant-numeric: tabular-nums;
     }
 
     .empty-state {
@@ -1800,6 +1862,33 @@
       <p id="approval-factor-help" style="font-size:11px; color:var(--text-dim); margin-top:6px;"></p>
     </div>
 
+    <!-- Default timing for new set lists -->
+    <div class="settings-section">
+      <h3>Default timing (for new set lists)</h3>
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px 16px; margin-bottom:4px;">
+        <label style="font-size:12px; color:var(--text-dim);">Target (min)
+          <input id="band-timing-target" type="number" class="settings-input" min="10" max="480" step="5" style="margin-top:4px;" />
+        </label>
+        <label style="font-size:12px; color:var(--text-dim);">Warn at (min)
+          <input id="band-timing-warn" type="number" class="settings-input" min="5" max="480" step="5" style="margin-top:4px;" />
+        </label>
+        <label style="font-size:12px; color:var(--text-dim);">Song buffer (s)
+          <input id="band-timing-buffer" type="number" class="settings-input" min="0" max="300" step="5" style="margin-top:4px;" />
+        </label>
+        <label style="font-size:12px; color:var(--text-dim);">Tuning change (s)
+          <input id="band-timing-tuning" type="number" class="settings-input" min="0" max="180" step="15" style="margin-top:4px;" />
+        </label>
+        <label style="font-size:12px; color:var(--text-dim);">Breaks
+          <input id="band-timing-breaks" type="number" class="settings-input" min="0" max="9" step="1" style="margin-top:4px;" placeholder="count" />
+        </label>
+        <label style="font-size:12px; color:var(--text-dim);">Break length (min)
+          <input id="band-timing-break-min" type="number" class="settings-input" min="0" max="120" step="5" style="margin-top:4px;" />
+        </label>
+      </div>
+      <p style="font-size:11px; color:var(--text-dim); margin-top:6px;">Applied when a new set list is created. Existing set lists are not affected.</p>
+      <button class="settings-btn ghost" style="margin-top:10px;" onclick="saveBandTimingDefaults()">Save defaults</button>
+    </div>
+
     <!-- Danger zone -->
     <div class="settings-section" id="band-danger-zone" style="display:none;">
       <h3 style="color:var(--red);">Danger zone</h3>
@@ -1865,6 +1954,83 @@
         <button class="settings-btn ghost" onclick="signOut()">Sign Out</button>
         <button class="settings-btn ghost" onclick="document.getElementById('user-settings-modal').style.display='none'; leaveBand();">Leave band</button>
       </div>
+    </div>
+  </div>
+</div>
+
+<div id="timing-settings-modal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,.7); z-index:1500; flex-direction:column; align-items:center; justify-content:center; padding:20px;">
+  <div style="background:var(--surface); border:1px solid var(--border); border-radius:var(--radius); padding:24px; max-width:420px; width:100%; max-height:90vh; overflow-y:auto;">
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
+      <h2 style="margin:0; font-size:18px;">Set List Settings</h2>
+      <button onclick="document.getElementById('timing-settings-modal').style.display='none'" style="background:none; border:none; font-size:24px; cursor:pointer; color:var(--text-dim); padding:0; width:30px; height:30px; display:flex; align-items:center; justify-content:center; line-height:1;">×</button>
+    </div>
+
+    <div class="settings-section">
+      <h3>Set list name</h3>
+      <div style="display:flex; gap:8px;">
+        <input id="timing-setlist-name" class="settings-input" style="flex:1;" placeholder="e.g. Headliner" />
+        <button class="settings-btn ghost" onclick="renameCurrentSetlist()">Rename</button>
+      </div>
+    </div>
+
+    <div class="settings-section">
+      <h3>Target length</h3>
+      <div style="display:flex; align-items:center; gap:10px;">
+        <input id="timing-target-min" type="number" class="settings-input" min="10" max="480" step="5" style="width:90px; flex:none;" oninput="onTimingInput()" />
+        <span style="font-size:13px; color:var(--text-dim);">minutes</span>
+        <span id="timing-target-fmt" style="font-size:13px; font-weight:600; color:var(--text-dim); margin-left:auto;"></span>
+      </div>
+      <p style="font-size:11px; color:var(--text-dim); margin-top:6px;">Set list turns red when total estimated time reaches this.</p>
+    </div>
+
+    <div class="settings-section">
+      <h3>Warn at</h3>
+      <div style="display:flex; align-items:center; gap:10px;">
+        <input id="timing-warn-min" type="number" class="settings-input" min="5" max="480" step="5" style="width:90px; flex:none;" oninput="onTimingInput()" />
+        <span style="font-size:13px; color:var(--text-dim);">minutes</span>
+        <span id="timing-warn-fmt" style="font-size:13px; font-weight:600; color:var(--text-dim); margin-left:auto;"></span>
+      </div>
+      <p style="font-size:11px; color:var(--text-dim); margin-top:6px;">Set list turns yellow when total reaches this. Must be less than target.</p>
+    </div>
+
+    <div class="settings-section">
+      <h3>Per-song buffer</h3>
+      <div style="display:flex; align-items:center; gap:12px;">
+        <input id="timing-buffer-s" type="range" min="0" max="300" step="5" style="flex:1;" oninput="onTimingInput()" />
+        <span id="timing-buffer-val" style="font-size:13px; font-weight:600; min-width:40px; text-align:right;">45s</span>
+      </div>
+      <p style="font-size:11px; color:var(--text-dim); margin-top:6px;">Added per play — accounts for banter, false starts, and mid-song retuning.</p>
+    </div>
+
+    <div class="settings-section">
+      <h3>Tuning-change time</h3>
+      <div style="display:flex; align-items:center; gap:12px;">
+        <input id="timing-tuning-s" type="range" min="0" max="180" step="15" style="flex:1;" oninput="onTimingInput()" />
+        <span id="timing-tuning-val" style="font-size:13px; font-weight:600; min-width:40px; text-align:right;">60s</span>
+      </div>
+      <p style="font-size:11px; color:var(--text-dim); margin-top:6px;">Added each time the tuning changes between consecutive songs.</p>
+    </div>
+
+    <div class="settings-section">
+      <h3>Breaks</h3>
+      <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+        <input id="timing-break-count" type="number" class="settings-input" min="0" max="9" step="1" style="width:60px; flex:none;" oninput="onTimingInput()" />
+        <span style="font-size:13px; color:var(--text-dim);">break(s) of</span>
+        <input id="timing-break-min" type="number" class="settings-input" min="0" max="120" step="5" style="width:70px; flex:none;" oninput="onTimingInput()" />
+        <span style="font-size:13px; color:var(--text-dim);">min each</span>
+      </div>
+      <p id="timing-break-help" style="font-size:11px; color:var(--text-dim); margin-top:6px;"></p>
+    </div>
+
+    <div style="display:flex; gap:10px; margin-top:8px;">
+      <button class="settings-btn" onclick="saveTimingSettings()">Save</button>
+      <button class="settings-btn ghost" onclick="resetTimingSettings()">Reset to defaults</button>
+    </div>
+
+    <div class="settings-section" id="timing-danger-zone" style="margin-top:20px; border-top:1px solid var(--border); padding-top:16px;">
+      <h3 style="color:var(--red);">Danger zone</h3>
+      <button class="settings-btn danger" onclick="deleteCurrentSetlist()">Delete this set list</button>
+      <p id="timing-delete-note" style="font-size:11px; color:var(--text-dim); margin-top:6px;"></p>
     </div>
   </div>
 </div>
@@ -2076,10 +2242,19 @@
     <div class="panel-header">
       <h2>Set List</h2>
       <div class="panel-tools" id="setlist-tools">
+        <select class="toolbar-select" id="setlist-switcher" aria-label="Switch set list" onchange="switchSetlist(this.value)" style="max-width:120px;"></select>
+        <button class="toolbar-btn" id="setlist-new-btn" onclick="promptCreateSetlist()" title="New set list" aria-label="New set list">＋</button>
         <select class="toolbar-select" id="set-group-by" title="Group set list" aria-label="Group set list">
           <option value="">No grouping</option>
           <option value="tuning">Group by tuning</option>
         </select>
+        <select class="toolbar-select" id="set-sort-by" title="Sort set list" aria-label="Sort set list">
+          <option value="">Manual order</option>
+          <option value="artist">Artist A–Z</option>
+          <option value="title">Title A–Z</option>
+          <option value="duration">Duration ↑</option>
+        </select>
+        <button class="toolbar-btn" id="timing-settings-btn" onclick="openTimingSettingsModal()" title="Timing settings" aria-label="Timing settings">⏱</button>
         <button type="button" class="toolbar-toggle" id="set-share-btn" title="Copy a read-only share link" onclick="shareSetlist()">🔗 Share</button>
       </div>
       <span class="spacer"></span>
@@ -2095,22 +2270,34 @@
       <div class="time-display">
         <span class="time-total ok" id="time-total">0:00</span>
         <span class="time-label">total rehearsal time</span>
+        <span class="time-breakdown" id="time-breakdown"></span>
       </div>
       <div class="progress-track">
         <div class="progress-fill ok" id="progress-fill" style="width:0%"></div>
+        <div class="progress-warn-tick" id="progress-warn-tick" style="left:80%"></div>
       </div>
       <div class="threshold-markers">
         <span>0:00</span>
-        <span>⚠️ 2h00</span>
-        <span>🛑 2h30</span>
+        <span id="marker-warn">⚠️ 2h00</span>
+        <span id="marker-target">🛑 2h30</span>
       </div>
+      <div class="tuning-breakdown" id="tuning-breakdown"></div>
     </div>
   </div>
 </div>
 
 <script>
-const THRESHOLD_WARN = 2 * 3600;       // 2h00 in seconds
-const THRESHOLD_MAX  = 2.5 * 3600;    // 2h30 in seconds
+// Rehearsal-time settings. These are sensible defaults; Phase B will make them
+// editable per set list (with band-level defaults) and populate _setlistSettings.
+const REHEARSAL_DEFAULTS = {
+  target_seconds: 2.5 * 3600,   // 2h30 — hard limit (red)
+  warn_seconds:   2 * 3600,     // 2h00 — warning (yellow)
+  song_buffer_seconds: 45,      // padding added per play (banter, false starts, etc.)
+  tuning_change_seconds: 60,    // added each time the tuning changes between songs
+  break_count: 0,
+  break_seconds: 0,
+};
+let _setlistSettings = null;    // active set list's settings; null → REHEARSAL_DEFAULTS
 
 // 5-point Likert voting scale
 const LIKERT_VOTES = [
@@ -2126,6 +2313,8 @@ const LIKERT_EMOJI      = { '5': '❤️', '4': '👍', '3': '😐', '2': '👎'
 
 let libraryData = [];   // [{id, name, duration_raw, duration_seconds, plays, extra}]
 let setListIds  = [];   // ordered list of ids currently in the set list
+let _currentSetlistId = null;   // active setlist UUID
+let _setlists = [];             // [{id, name, is_default, settings}] for the switcher
 let librarySearchText = '';  // tracks search text in library
 let setListSearchText = '';  // tracks search text in set list
 let expandedSongId = null;  // tracks which song card is currently expanded
@@ -2155,6 +2344,7 @@ function isUnset(v) { return !v || v === UNSET_STATUS; }
 
 let setListGroupedByTuning = false;  // sticky grouped mode
 let collapsedTunings = new Set();    // tuning keys currently collapsed
+let setListSortBy = '';              // '' | 'artist' | 'title' | 'duration'
 
 // Effective status used by the badge + the Library status filter.
 // A manual (or voting-written) Status wins; 'For Consideration' falls through to the
@@ -2450,6 +2640,8 @@ async function loadSharedView() {
     // renderSetList reads setListIds and looks songs up in libraryData via songById.
     libraryData = data.songs || [];
     setListIds  = libraryData.map(s => s.id);
+    // Drive the time-budget bar from the shared setlist's own timing settings.
+    _setlistSettings = data.settings || null;
 
     if (data.ownerName) {
       const logo = document.querySelector('.hdr-logo');
@@ -2480,7 +2672,8 @@ function showShareError() {
 // link to the clipboard. Works for both band and solo setlists.
 async function shareSetlist() {
   try {
-    const res = await apiFetch('/api/setlist/share');
+    const qs = _currentSetlistId ? ('?setlist_id=' + encodeURIComponent(_currentSetlistId)) : '';
+    const res = await apiFetch('/api/setlist/share' + qs);
     if (!res.ok) { showToast('Could not get share link'); return; }
     const { token } = await res.json();
     const url = location.origin + '/share/' + token;
@@ -2497,28 +2690,89 @@ async function shareSetlist() {
 }
 
 // ── API Data Layer ────────────────────────────────────────────────────────────
+
+// Apply the new GET /api/setlist response shape: {setlist_id, settings, entries}.
+// Overlays the active setlist's plays onto the shared libraryData song objects.
+function applySetlistResponse(data) {
+  if (!data || !Array.isArray(data.entries)) return;
+  _currentSetlistId = data.setlist_id || _currentSetlistId;
+  _setlistSettings  = data.settings  || null;
+  setListIds = data.entries.map(e => e.song_id);
+  data.entries.forEach(e => {
+    const s = songById(e.song_id);
+    if (s) s.plays = e.plays;
+  });
+  // Persist active setlist choice across reloads (keyed by owner).
+  const ownerKey = (_bandData?.id || _currentUserId || 'solo');
+  if (_currentSetlistId) {
+    try { localStorage.setItem(`rp_setlist_${ownerKey}`, _currentSetlistId); } catch {}
+  }
+}
+
+function renderSetlistSwitcher() {
+  const sel = document.getElementById('setlist-switcher');
+  if (!sel) return;
+  sel.innerHTML = '';
+  _setlists.forEach(sl => {
+    const opt = document.createElement('option');
+    opt.value = sl.id;
+    opt.textContent = sl.name;
+    if (sl.id === _currentSetlistId) opt.selected = true;
+    sel.appendChild(opt);
+  });
+}
+
+async function switchSetlist(id) {
+  if (id === _currentSetlistId) return;
+  const res = await apiFetch(`/api/setlist?setlist_id=${encodeURIComponent(id)}`);
+  if (!res.ok) { showToast('Failed to switch set list'); return; }
+  applySetlistResponse(await res.json());
+  renderSetlistSwitcher();
+  renderSetList();
+  renderLibrary();
+}
+
+async function loadActiveSetlist() {
+  // Restore last-used setlist id from localStorage, falling back to default.
+  const ownerKey = (_bandData?.id || _currentUserId || 'solo');
+  let storedId = null;
+  try { storedId = localStorage.getItem(`rp_setlist_${ownerKey}`); } catch {}
+  const inList = storedId && _setlists.some(sl => sl.id === storedId);
+  const target = inList ? storedId : (_setlists[0]?.id || null);
+  const url = target ? `/api/setlist?setlist_id=${encodeURIComponent(target)}` : '/api/setlist';
+  const res = await apiFetch(url);
+  if (res.ok) applySetlistResponse(await res.json());
+}
+
 async function loadAppData() {
   const overlay = document.getElementById('loading-overlay');
   overlay.style.display = 'flex';
   try {
-    const [songsRes, setlistRes, tuningsRes] = await Promise.all([
+    const [songsRes, setlistsRes, setlistRes, tuningsRes] = await Promise.all([
       apiFetch('/api/songs'),
+      apiFetch('/api/setlists'),
       apiFetch('/api/setlist'),
       apiFetch('/api/tunings'),
     ]);
     if (songsRes.status === 401) { signOut(); return; }
 
     libraryData     = await songsRes.json();
-    setListIds      = await setlistRes.json();
+    _setlists       = setlistsRes.ok ? await setlistsRes.json() : [];
     allTuningValues = await tuningsRes.json();
     const csEl = document.getElementById('custom-song-tuning');
     if (csEl) populateTuningSelect(csEl, '');
+
+    // Apply the setlist — but if we have a stored preference, load that instead.
+    const defaultData = await setlistRes.json();
+    applySetlistResponse(defaultData);
+    await loadActiveSetlist();   // may switch to stored preference
 
     if (libraryData.length === 0) {
       const seedRes = await apiFetch('/api/initial-songs');
       if (seedRes.ok) libraryData = await seedRes.json();
     }
 
+    renderSetlistSwitcher();
     renderLibrary();
     renderSetList();
     fetchAllAlbumArt();
@@ -2555,10 +2809,20 @@ async function apiDeleteSong(songId) {
   }).catch(() => showToast('Failed to delete song'));
 }
 
-let _setlistSaveTimer;
+let _setlistSaveTimer = null;
 function saveSetlistDebounced() {
   clearTimeout(_setlistSaveTimer);
-  _setlistSaveTimer = setTimeout(apiSaveSetlist, 500);
+  _setlistSaveTimer = setTimeout(() => { _setlistSaveTimer = null; apiSaveSetlist(); }, 500);
+}
+
+// If a debounced setlist save is pending, fire it now and wait for it. Lets callers
+// (e.g. pollNotifications, page-hide) guarantee local plays/order edits hit the DB
+// before anything refetches or the tab goes away.
+async function flushSetlistSave() {
+  if (!_setlistSaveTimer) return;
+  clearTimeout(_setlistSaveTimer);
+  _setlistSaveTimer = null;
+  await apiSaveSetlist();
 }
 
 async function apiSaveSetlist() {
@@ -2566,11 +2830,32 @@ async function apiSaveSetlist() {
     const song = songById(id);
     return { song_id: id, position: i, plays: song?.plays ?? 1 };
   });
-  apiFetch('/api/setlist', {
+  return apiFetch('/api/setlist', {
     method: 'POST',
-    body: JSON.stringify(entries),
+    body: JSON.stringify({ setlist_id: _currentSetlistId, entries }),
   }).catch(() => showToast('Failed to save set list'));
 }
+
+// Replace libraryData from a fresh /api/songs payload WITHOUT clobbering optimistic
+// play-count edits for songs currently in the set list. Guards the window where the
+// 60s poll's fetch was already in flight when the user bumped a count.
+function mergeFetchedSongs(fetched) {
+  const inSet = new Set(setListIds);
+  const localPlays = new Map();
+  for (const s of libraryData) {
+    if (inSet.has(s.id)) localPlays.set(s.id, s.plays);
+  }
+  for (const s of fetched) {
+    if (localPlays.has(s.id)) s.plays = localPlays.get(s.id);
+  }
+  return fetched;
+}
+
+// Don't let a count/order edit die with the tab inside the 500ms debounce window.
+window.addEventListener('pagehide', () => { flushSetlistSave(); });
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'hidden') flushSetlistSave();
+});
 
 async function apiAddTuning(tuning) {
   apiFetch('/api/tunings', {
@@ -2747,14 +3032,19 @@ function makeSongCard(song, inSetList) {
   plays.className = 'plays-control';
 
   if (inSetList) {
+    const playsLabel = document.createElement('span');
+    playsLabel.className = 'plays-label';
+    playsLabel.textContent = 'Runthru';
+    playsLabel.setAttribute('aria-label', 'Playthroughs');
+
     const playsCount = document.createElement('span');
     playsCount.className = 'plays-count';
     playsCount.textContent = song.plays;
     playsCount.id = `plays-${song.id}`;
 
     if (IS_SHARED_VIEW) {
-      // Read-only: show the play count, no +/− steppers.
-      plays.append(playsCount);
+      // Read-only: show the runthru count with its label, no +/− steppers.
+      plays.append(playsLabel, playsCount);
     } else {
       const decBtn = document.createElement('button');
       decBtn.textContent = '−';
@@ -2764,7 +3054,7 @@ function makeSongCard(song, inSetList) {
       incBtn.textContent = '+';
       incBtn.addEventListener('click', e => { e.stopPropagation(); changePlays(song.id, +1); });
 
-      plays.append(decBtn, playsCount, incBtn);
+      plays.append(playsLabel, decBtn, playsCount, incBtn);
     }
   }
 
@@ -2903,14 +3193,14 @@ function makeSongCard(song, inSetList) {
             if (songsRes.ok) {
               libraryData = await songsRes.json();
               const slRes = await apiFetch('/api/setlist');
-              if (slRes.ok) setListIds = await slRes.json();
+              if (slRes.ok) applySetlistResponse(await slRes.json());
             }
           } else if (result.status === 'approved' && song.extra.proposalStatus === 'pending') {
             const songsRes = await apiFetch('/api/songs');
             if (songsRes.ok) {
               libraryData = await songsRes.json();
               const slRes = await apiFetch('/api/setlist');
-              if (slRes.ok) setListIds = await slRes.json();
+              if (slRes.ok) applySetlistResponse(await slRes.json());
             }
           }
           renderLibrary(); renderSetList();
@@ -3266,6 +3556,20 @@ function applyNameMarquee() {
   });
 }
 
+// Apply an ephemeral sort lens to an array of song objects without touching setListIds.
+function applySongSort(arr) {
+  if (!setListSortBy) return arr;
+  const copy = arr.slice();
+  if (setListSortBy === 'artist') {
+    copy.sort((a, b) => (a.extra?.Artist || '').localeCompare(b.extra?.Artist || ''));
+  } else if (setListSortBy === 'title') {
+    copy.sort((a, b) => a.name.localeCompare(b.name));
+  } else if (setListSortBy === 'duration') {
+    copy.sort((a, b) => (a.duration_seconds || 0) - (b.duration_seconds || 0));
+  }
+  return copy;
+}
+
 // Set List: reorder ids so same-tuning songs are adjacent, then persist.
 // Stable — preserves first-appearance order of both groups and members.
 function groupSetListByTuning() {
@@ -3291,11 +3595,16 @@ function renderSetList() {
   const list = document.getElementById('setlist-list');
   list.innerHTML = '';
 
-  // Keep dropdown in sync with grouped state
+  // Keep dropdowns in sync with view state
   const groupSel = document.getElementById('set-group-by');
   if (groupSel) {
     groupSel.value = setListGroupedByTuning ? 'tuning' : '';
     groupSel.classList.toggle('active', setListGroupedByTuning);
+  }
+  const sortSel = document.getElementById('set-sort-by');
+  if (sortSel) {
+    sortSel.value = setListSortBy;
+    sortSel.classList.toggle('active', !!setListSortBy);
   }
 
   let songs = setListIds.map(songById).filter(Boolean);
@@ -3308,6 +3617,9 @@ function renderSetList() {
       s.extra?.Artist?.toLowerCase().includes(setListSearchText.toLowerCase())
     );
   }
+
+  // Apply ephemeral sort lens (does not modify setListIds)
+  songs = applySongSort(songs);
 
   const emptyEl = document.getElementById('setlist-empty') || (() => {
     const d = document.createElement('div');
@@ -3356,9 +3668,17 @@ function renderSetList() {
         renderLibrary();
       },
       onUpdate(evt) {
-        const id = evt.item.dataset.id;
-        setListIds = setListIds.filter(i => i !== id);
-        setListIds.splice(evt.newIndex, 0, id);
+        if (setListSortBy) {
+          // Sorted view active — bake the displayed DOM order into setListIds and clear the sort.
+          const newIds = [];
+          evt.to.querySelectorAll('.song-card').forEach(card => newIds.push(card.dataset.id));
+          setListIds = newIds;
+          setListSortBy = '';
+        } else {
+          const id = evt.item.dataset.id;
+          setListIds = setListIds.filter(i => i !== id);
+          setListIds.splice(evt.newIndex, 0, id);
+        }
         saveSetlistDebounced();
         renderSetList();
       },
@@ -3376,7 +3696,7 @@ function renderSetList() {
     ? `${songs.length} of ${totalCount} songs`
     : `${totalCount} song${totalCount !== 1 ? 's' : ''}`;
   document.getElementById('setlist-count').textContent = countText;
-  updateTimeBar(songs);
+  updateTimeBar();
   requestAnimationFrame(applyNameMarquee);
 }
 
@@ -3388,6 +3708,7 @@ function syncSetListFromDom() {
     });
   });
   setListIds = newIds;
+  setListSortBy = '';  // drag bakes the order; clear the sort lens
   saveSetlistDebounced();
 }
 
@@ -3513,11 +3834,10 @@ function changePlays(id, delta) {
   document.querySelectorAll(`#plays-${id}`).forEach(el => {
     el.textContent = song.plays;
   });
-  apiUpdateSong(song);
+  // plays lives on setlist_songs, not the songs table — only the setlist save persists it.
   saveSetlistDebounced();
-  // Re-calculate time bar
-  const songs = setListIds.map(songById).filter(Boolean);
-  updateTimeBar(songs);
+  // Re-calculate time bar (computes over the full set list internally)
+  updateTimeBar();
 }
 
 // ── Time parsing & formatting ────────────────────────────────────────────────
@@ -3531,32 +3851,88 @@ function parse_duration(s) {
   return 0;
 }
 
-function roundToNearest30s(seconds) {
-  return Math.ceil(seconds / 30) * 30;
-}
-
 function formatTime(seconds) {
   const h = Math.floor(seconds / 3600);
   const m = Math.floor((seconds % 3600) / 60);
-  const s = seconds % 60;
+  const s = Math.round(seconds % 60);
   return h > 0
     ? `${h}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`
     : `${m}:${String(s).padStart(2,'0')}`;
 }
 
-function updateTimeBar(songs) {
-  const total = songs.reduce((acc, s) => acc + roundToNearest30s(s.duration_seconds) * s.plays, 0);
-  const pct = Math.min(100, (total / THRESHOLD_MAX) * 100);
+// Compact budget label for threshold markers, e.g. 9000 → "2h30", 6300 → "1h45", 2700 → "45m".
+function formatBudget(seconds) {
+  const h = Math.floor(seconds / 3600);
+  const m = Math.round((seconds % 3600) / 60);
+  return h > 0 ? `${h}h${String(m).padStart(2,'0')}` : `${m}m`;
+}
 
-  const cls = total >= THRESHOLD_MAX ? 'over' : total >= THRESHOLD_WARN ? 'warn' : 'ok';
+// Tuning of a song for grouping / change-counting (mirrors groupSetListByTuning).
+function tuningOfSong(s) {
+  return (s && (s.extra?.OurTuning || s.extra?.Tuning)) || '';
+}
+
+// Recompute the rehearsal-time pane from the FULL ordered set list (never the
+// search-filtered subset). Total = breaks + Σ(duration + per-song buffer)×plays
+// + (number of tuning changes between consecutive songs) × tuning-change time.
+function updateTimeBar() {
+  const cfg = _setlistSettings || REHEARSAL_DEFAULTS;
+  const songs = setListIds.map(songById).filter(Boolean);
+
+  // Per-song time includes a fixed buffer per play (banter, false starts, retunes mid-song).
+  const songTotal = songs.reduce(
+    (acc, s) => acc + (s.duration_seconds + cfg.song_buffer_seconds) * s.plays, 0);
+
+  // Tuning changes: count transitions where a song's tuning differs from the previous
+  // song's. Repeated plays of one song stay in the same tuning, so we compare song-to-song
+  // (not expanded by plays) — repeats add no extra change.
+  let changes = 0;
+  for (let i = 1; i < songs.length; i++) {
+    if (tuningOfSong(songs[i]) !== tuningOfSong(songs[i - 1])) changes++;
+  }
+
+  const breaks = (cfg.break_count || 0) * (cfg.break_seconds || 0);
+  const total  = breaks + songTotal + changes * cfg.tuning_change_seconds;
+
+  const target = cfg.target_seconds || 1;  // guard divide-by-zero
+  const pct = Math.min(100, (total / target) * 100);
+  const cls = total >= target ? 'over' : total >= cfg.warn_seconds ? 'warn' : 'ok';
 
   const totalEl = document.getElementById('time-total');
   const fillEl  = document.getElementById('progress-fill');
-
   totalEl.textContent = formatTime(total);
   totalEl.className = `time-total ${cls}`;
   fillEl.style.width = pct + '%';
   fillEl.className = `progress-fill ${cls}`;
+
+  // Threshold markers + warn tick, driven by the configured warn/target.
+  document.getElementById('marker-warn').textContent   = `⚠️ ${formatBudget(cfg.warn_seconds)}`;
+  document.getElementById('marker-target').textContent = `🛑 ${formatBudget(cfg.target_seconds)}`;
+  document.getElementById('progress-warn-tick').style.left =
+    Math.min(100, (cfg.warn_seconds / target) * 100) + '%';
+
+  // Breakdown: song count + total plays.
+  const totalPlays = songs.reduce((acc, s) => acc + s.plays, 0);
+  document.getElementById('time-breakdown').textContent = songs.length
+    ? `${songs.length} song${songs.length !== 1 ? 's' : ''} · ${totalPlays} play${totalPlays !== 1 ? 's' : ''}`
+    : '';
+
+  // Per-tuning breakdown chips (time per tuning group) — only when more than one tuning.
+  const perTuning = new Map();
+  songs.forEach(s => {
+    const key = tuningOfSong(s) || '—';
+    perTuning.set(key, (perTuning.get(key) || 0) + (s.duration_seconds + cfg.song_buffer_seconds) * s.plays);
+  });
+  const tb = document.getElementById('tuning-breakdown');
+  tb.innerHTML = '';
+  if (perTuning.size > 1) {
+    perTuning.forEach((secs, key) => {
+      const chip = document.createElement('span');
+      chip.className = 'tuning-chip';
+      chip.textContent = `${key} ${formatTime(secs)}`;
+      tb.appendChild(chip);
+    });
+  }
 }
 
 // ── Status ────────────────────────────────────────────────────────────────────
@@ -4243,9 +4619,37 @@ function openBandSettingsModal() {
   document.getElementById('approval-factor-value').textContent = factor;
   updateApprovalHelp(factor);
 
+  // Populate band timing defaults.
+  const td = _bandData.time_defaults || {};
+  document.getElementById('band-timing-target').value    = Math.round((td.target_seconds   || 9000) / 60);
+  document.getElementById('band-timing-warn').value      = Math.round((td.warn_seconds     || 7200) / 60);
+  document.getElementById('band-timing-buffer').value    = td.song_buffer_seconds   ?? 45;
+  document.getElementById('band-timing-tuning').value    = td.tuning_change_seconds ?? 60;
+  document.getElementById('band-timing-breaks').value    = td.break_count           ?? 0;
+  document.getElementById('band-timing-break-min').value = Math.round((td.break_seconds || 0) / 60);
+
   document.getElementById('band-danger-zone').style.display = isAdmin ? 'block' : 'none';
   document.getElementById('band-leave-error').style.display = 'none';
   document.getElementById('band-info-modal').style.display = 'flex';
+}
+
+async function saveBandTimingDefaults() {
+  const defaults = {
+    target_seconds:        Number(document.getElementById('band-timing-target').value) * 60,
+    warn_seconds:          Number(document.getElementById('band-timing-warn').value)   * 60,
+    song_buffer_seconds:   Number(document.getElementById('band-timing-buffer').value),
+    tuning_change_seconds: Number(document.getElementById('band-timing-tuning').value),
+    break_count:           Number(document.getElementById('band-timing-breaks').value),
+    break_seconds:         Number(document.getElementById('band-timing-break-min').value) * 60,
+  };
+  try {
+    const res = await apiFetch('/api/band', { method: 'PATCH', body: JSON.stringify({ time_defaults: defaults }) });
+    if (!res.ok) throw new Error((await res.json()).error || 'Failed');
+    _bandData = await res.json();
+    showToast('✓ Default timing saved');
+  } catch (err) {
+    showToast(err.message || 'Failed to save defaults');
+  }
 }
 
 function renderBandMembers() {
@@ -4428,6 +4832,171 @@ function resetToBandSetup() {
   document.getElementById('band-setup-overlay').style.display = 'flex';
 }
 
+// ── Timing Settings Modal ─────────────────────────────────────────────────────
+
+function loadTimingSettings() {
+  // Phase B: settings come from the API (applySetlistResponse). This is a no-op kept
+  // for backward-compat in case of cold-start before the setlist response arrives.
+}
+
+function _populateTimingInputs(cfg) {
+  document.getElementById('timing-target-min').value  = Math.round(cfg.target_seconds / 60);
+  document.getElementById('timing-warn-min').value    = Math.round(cfg.warn_seconds / 60);
+  document.getElementById('timing-buffer-s').value   = cfg.song_buffer_seconds;
+  document.getElementById('timing-tuning-s').value   = cfg.tuning_change_seconds;
+  document.getElementById('timing-break-count').value = cfg.break_count;
+  document.getElementById('timing-break-min').value  = Math.round((cfg.break_seconds || 0) / 60);
+  _refreshTimingReadouts(cfg);
+}
+
+function _refreshTimingReadouts(cfg) {
+  const targetMin  = Number(document.getElementById('timing-target-min').value) || 0;
+  const warnMin    = Number(document.getElementById('timing-warn-min').value)   || 0;
+  const bufferS    = Number(document.getElementById('timing-buffer-s').value)   || 0;
+  const tuningS    = Number(document.getElementById('timing-tuning-s').value)   || 0;
+  const breakCount = Number(document.getElementById('timing-break-count').value) || 0;
+  const breakMin   = Number(document.getElementById('timing-break-min').value)  || 0;
+
+  document.getElementById('timing-target-fmt').textContent = formatBudget(targetMin * 60);
+  document.getElementById('timing-warn-fmt').textContent   = formatBudget(warnMin * 60);
+  document.getElementById('timing-buffer-val').textContent = bufferS + 's';
+  document.getElementById('timing-tuning-val').textContent = tuningS + 's';
+
+  const totalBreak = breakCount * breakMin;
+  document.getElementById('timing-break-help').textContent = breakCount > 0
+    ? `${breakCount} break${breakCount !== 1 ? 's' : ''} × ${breakMin} min = ${totalBreak} min total`
+    : 'No breaks.';
+}
+
+function onTimingInput() {
+  _refreshTimingReadouts();
+}
+
+function openTimingSettingsModal() {
+  const cfg = _setlistSettings || REHEARSAL_DEFAULTS;
+  _populateTimingInputs(cfg);
+  // Populate name field.
+  const active = _setlists.find(sl => sl.id === _currentSetlistId);
+  document.getElementById('timing-setlist-name').value = active?.name || '';
+  // Danger zone: disable delete if only one setlist.
+  const deleteBtn = document.querySelector('#timing-danger-zone .settings-btn.danger');
+  const deleteNote = document.getElementById('timing-delete-note');
+  if (_setlists.length <= 1) {
+    if (deleteBtn) deleteBtn.disabled = true;
+    if (deleteNote) deleteNote.textContent = 'You must have at least one set list.';
+  } else {
+    if (deleteBtn) deleteBtn.disabled = false;
+    if (deleteNote) deleteNote.textContent = 'Permanently removes this set list and its song order.';
+  }
+  document.getElementById('timing-settings-modal').style.display = 'flex';
+}
+
+async function saveTimingSettings() {
+  const targetMin  = Number(document.getElementById('timing-target-min').value);
+  const warnMin    = Number(document.getElementById('timing-warn-min').value);
+  const bufferS    = Number(document.getElementById('timing-buffer-s').value);
+  const tuningS    = Number(document.getElementById('timing-tuning-s').value);
+  const breakCount = Number(document.getElementById('timing-break-count').value);
+  const breakMin   = Number(document.getElementById('timing-break-min').value);
+
+  if (targetMin < 10) { showToast('Target must be at least 10 minutes'); return; }
+  if (warnMin >= targetMin) { showToast('Warn threshold must be less than target'); return; }
+  if (warnMin < 1)   { showToast('Warn threshold must be at least 1 minute'); return; }
+
+  const settings = {
+    target_seconds:        targetMin  * 60,
+    warn_seconds:          warnMin    * 60,
+    song_buffer_seconds:   bufferS,
+    tuning_change_seconds: tuningS,
+    break_count:           breakCount,
+    break_seconds:         breakMin   * 60,
+  };
+
+  if (_currentSetlistId) {
+    const res = await apiFetch(`/api/setlists/${_currentSetlistId}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ settings }),
+    });
+    if (!res.ok) { showToast('Failed to save settings'); return; }
+    const updated = await res.json();
+    _setlistSettings = updated.settings;
+    const sl = _setlists.find(s => s.id === _currentSetlistId);
+    if (sl) sl.settings = updated.settings;
+  } else {
+    // Offline / pre-auth fallback (e.g. dev mode without a setlist yet).
+    _setlistSettings = settings;
+  }
+  updateTimeBar();
+  document.getElementById('timing-settings-modal').style.display = 'none';
+  showToast('✓ Settings saved');
+}
+
+async function resetTimingSettings() {
+  // Reset to band defaults (or REHEARSAL_DEFAULTS for solo).
+  const defaults = _bandData?.time_defaults || REHEARSAL_DEFAULTS;
+  if (_currentSetlistId) {
+    const res = await apiFetch(`/api/setlists/${_currentSetlistId}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ settings: defaults }),
+    });
+    if (!res.ok) { showToast('Failed to reset settings'); return; }
+    const updated = await res.json();
+    _setlistSettings = updated.settings;
+    const sl = _setlists.find(s => s.id === _currentSetlistId);
+    if (sl) sl.settings = updated.settings;
+    _populateTimingInputs(_setlistSettings);
+  } else {
+    _setlistSettings = null;
+    _populateTimingInputs(REHEARSAL_DEFAULTS);
+  }
+  updateTimeBar();
+  showToast('✓ Reset to defaults');
+}
+
+async function renameCurrentSetlist() {
+  const name = document.getElementById('timing-setlist-name').value.trim();
+  if (!name) { showToast('Name is required'); return; }
+  if (!_currentSetlistId) return;
+  const res = await apiFetch(`/api/setlists/${_currentSetlistId}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ name }),
+  });
+  if (!res.ok) { showToast('Failed to rename set list'); return; }
+  const sl = _setlists.find(s => s.id === _currentSetlistId);
+  if (sl) sl.name = name;
+  renderSetlistSwitcher();
+  showToast(`✓ Renamed to "${name}"`);
+}
+
+async function promptCreateSetlist() {
+  const name = prompt('New set list name:');
+  if (!name || !name.trim()) return;
+  const res = await apiFetch('/api/setlists', {
+    method: 'POST',
+    body: JSON.stringify({ name: name.trim() }),
+  });
+  if (!res.ok) { showToast('Failed to create set list'); return; }
+  const sl = await res.json();
+  _setlists.push(sl);
+  renderSetlistSwitcher();
+  await switchSetlist(sl.id);
+  showToast(`✓ Created "${sl.name}"`);
+}
+
+async function deleteCurrentSetlist() {
+  if (_setlists.length <= 1) { showToast('Cannot delete the last set list'); return; }
+  const active = _setlists.find(sl => sl.id === _currentSetlistId);
+  if (!confirm(`Delete "${active?.name || 'this set list'}"? This cannot be undone.`)) return;
+  const res = await apiFetch(`/api/setlists/${_currentSetlistId}`, { method: 'DELETE' });
+  if (!res.ok) { showToast('Failed to delete set list'); return; }
+  const { new_default_id } = await res.json();
+  _setlists = _setlists.filter(sl => sl.id !== _currentSetlistId);
+  document.getElementById('timing-settings-modal').style.display = 'none';
+  await switchSetlist(new_default_id);
+  renderSetlistSwitcher();
+  showToast('✓ Set list deleted');
+}
+
 // ── My Settings Modal ────────────────────────────────────────────────────────────
 
 function openUserSettingsModal() {
@@ -4604,9 +5173,12 @@ function countUnvotedProposals() {
 async function pollNotifications() {
   if (!_bandData) return;
   try {
+    // Persist any pending play-count/order edit before refetching, so the DB holds
+    // the latest values and the refresh doesn't revert what the user just changed.
+    await flushSetlistSave();
     const res = await apiFetch('/api/songs');
     if (res.ok) {
-      libraryData = await res.json();
+      libraryData = mergeFetchedSongs(await res.json());
       renderLibrary();
     }
   } catch {}
@@ -4807,7 +5379,7 @@ async function submitVote(proposalId, vote) {
     if (songsRes.ok) {
       libraryData = await songsRes.json();
       const setlistRes = await apiFetch('/api/setlist');
-      if (setlistRes.ok) setListIds = await setlistRes.json();
+      if (setlistRes.ok) applySetlistResponse(await setlistRes.json());
       renderLibrary();
       renderSetList();
     }
@@ -4886,6 +5458,14 @@ document.getElementById('voting-modal-close').addEventListener('click', () => {
         renderSetList();
         renderLibrary();
       }
+    });
+  }
+
+  const setSortSel = document.getElementById('set-sort-by');
+  if (setSortSel) {
+    setSortSel.addEventListener('change', e => {
+      setListSortBy = e.target.value;
+      renderSetList();
     });
   }
 })();

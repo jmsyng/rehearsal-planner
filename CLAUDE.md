@@ -657,6 +657,49 @@ showing "5/25 · need 15" — confirming size-independence. No console errors.
 **State at session end:** All changes local only (not committed, not deployed). Migration 002
 applied to the local/connected Neon DB only.
 
+### Session: Set List Sort By Feature (2026-06-04)
+
+Added a "Sort By" control to the set list toolbar. **All in `templates/index.html`.** Branch: `claude/set-list-sort-feature-fQ2Fz`, PR #12 — merged and deployed.
+
+**What was built:**
+
+- **`<select id="set-sort-by">` toolbar control** — sits next to "Group by tuning" in the set list panel header. Options: Manual order (default) / Artist A–Z / Title A–Z / Duration ↑. Styled via existing `.toolbar-select`; highlights amber (`.active`) when a non-default sort is active.
+
+- **Ephemeral sort lens** — `setListSortBy` is a view-only state variable. `setListIds` (the DB-backed order) is **never modified** by the sort. `applySongSort(arr)` returns a sorted copy of the songs array; `renderSetList()` calls it after the search filter, before the flat/grouped render branch — so one insertion covers both paths.
+
+- **Drag-to-bake** — when the user drags a card while a sort is active, the `onUpdate` handler reads the full sorted DOM order into `setListIds`, clears `setListSortBy`, and saves. Dragging is treated as "commit this arrangement." Same bake-and-clear added to `syncSetListFromDom()` (the grouped-mode drag handler).
+
+- **Compound sort with grouping** — when both "Group by tuning" and a sort are active, `applySongSort` runs on the `songs` array before it's passed to `renderSetListGrouped`, so songs within each tuning group are ordered by the chosen criterion.
+
+**New globals/helpers:** `let setListSortBy = ''` (state), `applySongSort(arr)` (pure helper before `groupSetListByTuning`).
+
+**Adjacent features considered but deferred:** descending/reverse toggle, sort-by-plays, filter-by-tuning on the set list side, `localStorage` sort persistence, position-number opacity dimming while sorted.
+
+**No DB migration needed** — pure frontend change.
+
+### Session: Vote Submit Fix, Threshold Rework & Modal Polish (2026-06-04)
+
+**Bugs fixed:**
+
+- **"Failed to submit vote" (500 crash).** `cast_vote` triggered auto-add-to-setlist when a proposal crossed the approval threshold. Two helpers (`_default_setlist_id`, `_auto_add_to_setlist`) read results as `row[0]` (positional), but `cast_vote` opens a `RealDictCursor` — `KeyError: 0`. Fixed to read by column name. This was the root cause of the notification-bell vote failure.
+
+- **4-member band cap removed from `db.join_band`; sanity ceiling of 24 added.** Previous code hard-capped bands at 4 members. Now joins fail only if the band already has ≥ 24 members.
+
+**Scoring model updated (`db.py`, `schema.sql`, `templates/index.html`):**
+
+- `approval_factor` default raised from **3.0 → 3.25**. At 3.25 a 4-member band needs **13/20** to approve — meaning 4 Mehs (12) and 2 Love+2 Hard-no (12) both fall below the bar. Scales to other sizes: 2→7/10, 3→10/15, 5→17/25, 6→20/30.
+- Migration **003** (`migrations/003_approval_factor_3_25.sql`) updates existing bands still on 3.0 to 3.25. Bands with a custom value are left alone.
+- All JS fallback references updated from `?? 3.0` → `?? 3.25`. Band Settings slider default display updated to match.
+
+**Voting modal polish (`renderVotingCard`):**
+
+- **Score line** simplified to `Score: N (X pts to approve)` — no more fractions or "avg per member" phrasing.
+- **Legend** corrected: was `1 · Hard no … 5 · Love it` (reversed vs the buttons); now `5 · Love it … 1 · Hard no`.
+- **"Skip ›" → "Next ›"** on the queue navigation button.
+- **Members count** in Band Settings header now shows `Members (N/24)`.
+
+**Deployment:** committed and pushed to `main` in one commit (`7e1155a`). Migrations were already applied to Neon DB before push.
+
 ## Maintenance Pattern for This File
 
 When future sessions do meaningful work in this project, ask Claude:

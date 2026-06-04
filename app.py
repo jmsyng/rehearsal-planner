@@ -213,40 +213,151 @@ def api_delete_song(song_id):
 
 # ── Set List API ───────────────────────────────────────────────────────────────
 
+def _resolve_setlist(band, user_id, setlist_id=None):
+    """Resolve + validate a setlist_id for the current user/band.
+    Returns (setlist_id, error_response) — one of the two will be None."""
+    band_id = band["id"] if band else None
+    if setlist_id:
+        # Validate ownership.
+        import psycopg2
+        from psycopg2 import connect
+        conn = db.get_conn()
+        try:
+            with conn.cursor() as cur:
+                owned = db._owns_setlist(cur, setlist_id,
+                                         user_id=None if band_id else user_id,
+                                         band_id=band_id)
+            db.put_conn(conn)
+        except Exception:
+            db.put_conn(conn)
+            return None, (jsonify({"error": "invalid setlist_id"}), 400)
+        if not owned:
+            return None, (jsonify({"error": "Set list not found"}), 404)
+        return setlist_id, None
+    # No id provided — use the default (earliest) setlist, creating if needed.
+    conn = db.get_conn()
+    try:
+        with conn.cursor() as cur:
+            sid = db._default_setlist_id(cur, band_id=band_id,
+                                          user_id=None if band_id else user_id,
+                                          create=True)
+        conn.commit()
+        db.put_conn(conn)
+    except Exception:
+        conn.rollback()
+        db.put_conn(conn)
+        raise
+    return str(sid), None
+
+
+@app.route("/api/setlists", methods=["GET"])
+@require_auth
+def api_list_setlists():
+    band = db.get_user_band(g.user_id)
+    if band:
+        return jsonify(db.list_setlists(band_id=band["id"]))
+    return jsonify(db.list_setlists(user_id=g.user_id))
+
+
+@app.route("/api/setlists", methods=["POST"])
+@require_auth
+def api_create_setlist():
+    data = request.get_json(force=True) or {}
+    name = (data.get("name") or "").strip()
+    if not name:
+        return jsonify({"error": "name is required"}), 400
+    band = db.get_user_band(g.user_id)
+    if band:
+        sl = db.create_setlist(name, band_id=band["id"])
+    else:
+        sl = db.create_setlist(name, user_id=g.user_id)
+    return jsonify(sl), 201
+
+
+@app.route("/api/setlists/<setlist_id>", methods=["PATCH"])
+@require_auth
+def api_update_setlist(setlist_id):
+    band = db.get_user_band(g.user_id)
+    band_id = band["id"] if band else None
+    user_id = None if band_id else g.user_id
+    data = request.get_json(force=True) or {}
+    try:
+        if "name" in data:
+            name = (data["name"] or "").strip()
+            if not name:
+                return jsonify({"error": "name is required"}), 400
+            db.rename_setlist(setlist_id, name, band_id=band_id, user_id=user_id)
+        if "settings" in data:
+            db.update_setlist_settings(setlist_id, data["settings"],
+                                       band_id=band_id, user_id=user_id)
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 404
+    sl = db.get_setlist_full(setlist_id)
+    return jsonify(sl)
+
+
+@app.route("/api/setlists/<setlist_id>", methods=["DELETE"])
+@require_auth
+def api_delete_setlist(setlist_id):
+    band = db.get_user_band(g.user_id)
+    band_id = band["id"] if band else None
+    user_id = None if band_id else g.user_id
+    try:
+        new_default_id = db.delete_setlist(setlist_id, band_id=band_id, user_id=user_id)
+    except ValueError as e:
+        msg = str(e)
+        return jsonify({"error": msg}), (409 if "last" in msg else 404)
+    return jsonify({"ok": True, "new_default_id": new_default_id})
+
+
 @app.route("/api/setlist", methods=["GET"])
 @require_auth
 def api_get_setlist():
+    """Returns {setlist_id, settings, entries:[{song_id, plays}]}.
+    Optional ?setlist_id= param to fetch a specific setlist."""
     band = db.get_user_band(g.user_id)
-    if band:
-        return jsonify(db.get_band_setlist(band["id"]))
-    return jsonify(db.get_setlist(g.user_id))
+    sid, err = _resolve_setlist(band, g.user_id, request.args.get("setlist_id"))
+    if err:
+        return err
+    data = db.get_setlist_full(sid)
+    if not data:
+        return jsonify({"error": "Set list not found"}), 404
+    return jsonify(data)
 
 
 @app.route("/api/setlist", methods=["POST"])
 @require_auth
 def api_save_setlist():
-    """Body: [{"song_id": str, "position": int, "plays": int}, ...]"""
-    entries = request.get_json(force=True)
-    if not isinstance(entries, list):
-        return jsonify({"error": "Expected array"}), 400
-    band = db.get_user_band(g.user_id)
-    if band:
-        db.save_band_setlist(band["id"], entries)
+    """Body: {setlist_id?, entries:[{song_id, position, plays}]}
+    Also accepts legacy bare array (saves to default setlist)."""
+    body = request.get_json(force=True)
+    if isinstance(body, list):
+        # Legacy shape — save to default setlist.
+        entries = body
+        setlist_id_hint = None
     else:
-        db.save_setlist(g.user_id, entries)
+        entries = (body or {}).get("entries", [])
+        setlist_id_hint = (body or {}).get("setlist_id")
+    if not isinstance(entries, list):
+        return jsonify({"error": "entries must be an array"}), 400
+    band = db.get_user_band(g.user_id)
+    sid, err = _resolve_setlist(band, g.user_id, setlist_id_hint)
+    if err:
+        return err
+    db.save_setlist_entries(sid, entries)
     return jsonify({"ok": True})
 
 
 @app.route("/api/setlist/share", methods=["GET"])
 @require_auth
 def api_get_setlist_share():
-    """Return the share token for the caller's default setlist (band or solo)."""
+    """Return the share token for a setlist (defaults to the caller's default setlist).
+    Optional ?setlist_id= to share a specific one."""
     band = db.get_user_band(g.user_id)
-    if band:
-        token = db.get_setlist_share_token(band_id=band["id"])
-    else:
-        token = db.get_setlist_share_token(user_id=g.user_id)
-    return jsonify({"token": token})
+    sid, err = _resolve_setlist(band, g.user_id, request.args.get("setlist_id"))
+    if err:
+        return err
+    return jsonify({"token": db.get_setlist_share_token(sid)})
 
 
 # ── Tunings API ────────────────────────────────────────────────────────────────
@@ -467,6 +578,11 @@ def api_update_band():
             db.set_approval_factor(band["id"], float(data["approval_factor"]))
         except (TypeError, ValueError):
             return jsonify({"error": "approval_factor must be a number"}), 400
+    if "time_defaults" in data:
+        try:
+            db.set_band_time_defaults(band["id"], data["time_defaults"])
+        except (TypeError, ValueError) as e:
+            return jsonify({"error": str(e) or "invalid time_defaults"}), 400
     return jsonify(db.get_user_band(g.user_id))
 
 

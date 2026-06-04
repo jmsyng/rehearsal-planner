@@ -7,6 +7,19 @@ from psycopg2.extras import RealDictCursor
 
 DEFAULT_TUNINGS = ['E standard', 'Eb', 'Drop D', 'Drop C#']
 
+# Default timing settings (matches migration 004 / schema.sql defaults).
+# Used to seed solo-user setlists and as the fallback in get_setlist_full.
+SOLO_DEFAULT_SETTINGS = {
+    "target_seconds": 9000,
+    "warn_seconds": 7200,
+    "song_buffer_seconds": 45,
+    "tuning_change_seconds": 60,
+    "break_count": 0,
+    "break_seconds": 0,
+}
+_SETTINGS_COLS = list(SOLO_DEFAULT_SETTINGS.keys())
+_BAND_DEFAULT_COLS = [f"default_{c}" for c in _SETTINGS_COLS]
+
 # 5-point Likert scale — stored as strings "1"–"5"
 VOTE_POINTS = {"5": 5, "4": 4, "3": 3, "2": 2, "1": 1}
 # Approval threshold = math.ceil(band_size * approval_factor), computed in cast_vote.
@@ -328,10 +341,28 @@ def _default_setlist_id(cur, *, user_id=None, band_id=None, create=False):
         return row["id"] if isinstance(row, dict) else row[0]
     if not create:
         return None
-    cur.execute(
-        "INSERT INTO setlists (name, band_id, user_id) VALUES ('Main Set', %s, %s) RETURNING id",
-        (band_id, None if band_id else user_id)
-    )
+    # Seed new setlist with timing settings from band defaults (if band) or
+    # SOLO_DEFAULT_SETTINGS (if solo / band columns not available).
+    if band_id:
+        cur.execute("""
+            INSERT INTO setlists (name, band_id,
+                target_seconds, warn_seconds, song_buffer_seconds,
+                tuning_change_seconds, break_count, break_seconds)
+            SELECT 'Main Set', %s,
+                b.default_target_seconds, b.default_warn_seconds, b.default_song_buffer_seconds,
+                b.default_tuning_change_seconds, b.default_break_count, b.default_break_seconds
+            FROM bands b WHERE b.id = %s
+            RETURNING id
+        """, (band_id, band_id))
+    else:
+        d = SOLO_DEFAULT_SETTINGS
+        cur.execute("""
+            INSERT INTO setlists (name, user_id,
+                target_seconds, warn_seconds, song_buffer_seconds,
+                tuning_change_seconds, break_count, break_seconds)
+            VALUES ('Main Set', %s, %s, %s, %s, %s, %s, %s) RETURNING id
+        """, (user_id, d["target_seconds"], d["warn_seconds"], d["song_buffer_seconds"],
+              d["tuning_change_seconds"], d["break_count"], d["break_seconds"]))
     new_row = cur.fetchone()
     return new_row["id"] if isinstance(new_row, dict) else new_row[0]
 
@@ -413,20 +444,101 @@ def save_band_setlist(band_id: str, entries: list) -> None:
 # ── Public read-only sharing ─────────────────────────────────────────────────────
 #
 # Every setlist carries a permanent, unguessable share_token (like bands.invite_token).
-# get_setlist_share_token returns it for the owner (creating the default setlist on
-# demand). get_shared_setlist resolves a token to a public, read-only payload — only
-# display fields, no proposals/votes/emails/library songs.
+# get_setlist_share_token returns the token for a given setlist (caller resolves +
+# validates ownership). get_shared_setlist resolves a token to a public, read-only
+# payload — only display fields, no proposals/votes/emails/library songs.
 
-def get_setlist_share_token(*, user_id=None, band_id=None) -> str:
-    """Return the share token of the owner's default setlist, creating it if needed."""
+def get_setlist_share_token(setlist_id: str) -> str:
+    """Return the permanent share token for a specific setlist."""
     conn = get_conn()
     try:
         with conn.cursor() as cur:
-            sid = _default_setlist_id(cur, user_id=user_id, band_id=band_id, create=True)
-            cur.execute("SELECT share_token FROM setlists WHERE id = %s", (sid,))
-            token = cur.fetchone()[0]
-        conn.commit()  # _default_setlist_id may have inserted a new setlist
-        return token
+            cur.execute("SELECT share_token FROM setlists WHERE id = %s", (setlist_id,))
+            row = cur.fetchone()
+            return row[0] if row else None
+    finally:
+        put_conn(conn)
+
+
+# ── Multi-setlist helpers ─────────────────────────────────────────────────────
+
+def _owns_setlist(cur, setlist_id: str, *, user_id=None, band_id=None) -> bool:
+    """Return True if the given owner owns setlist_id."""
+    if band_id:
+        cur.execute("SELECT 1 FROM setlists WHERE id = %s AND band_id = %s", (setlist_id, band_id))
+    else:
+        cur.execute("SELECT 1 FROM setlists WHERE id = %s AND user_id = %s", (setlist_id, user_id))
+    return cur.fetchone() is not None
+
+
+def _settings_from_row(row) -> dict:
+    return {c: row[c] for c in _SETTINGS_COLS}
+
+
+def list_setlists(*, user_id=None, band_id=None) -> list:
+    """Return all setlists for the owner, oldest first. Each dict includes settings."""
+    conn = get_conn()
+    try:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            if band_id:
+                cur.execute(
+                    "SELECT * FROM setlists WHERE band_id = %s ORDER BY created_at",
+                    (band_id,)
+                )
+            else:
+                cur.execute(
+                    "SELECT * FROM setlists WHERE user_id = %s ORDER BY created_at",
+                    (user_id,)
+                )
+            rows = cur.fetchall()
+        result = []
+        for i, r in enumerate(rows):
+            result.append({
+                "id": str(r["id"]),
+                "name": r["name"],
+                "is_default": i == 0,
+                "settings": _settings_from_row(r),
+            })
+        return result
+    finally:
+        put_conn(conn)
+
+
+def create_setlist(name: str, *, user_id=None, band_id=None) -> dict:
+    """Create a new named setlist, seeded from band defaults (or SOLO_DEFAULT_SETTINGS)."""
+    conn = get_conn()
+    try:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            if band_id:
+                cur.execute("""
+                    INSERT INTO setlists (name, band_id,
+                        target_seconds, warn_seconds, song_buffer_seconds,
+                        tuning_change_seconds, break_count, break_seconds)
+                    SELECT %s, %s,
+                        b.default_target_seconds, b.default_warn_seconds,
+                        b.default_song_buffer_seconds, b.default_tuning_change_seconds,
+                        b.default_break_count, b.default_break_seconds
+                    FROM bands b WHERE b.id = %s
+                    RETURNING *
+                """, (name, band_id, band_id))
+            else:
+                d = SOLO_DEFAULT_SETTINGS
+                cur.execute("""
+                    INSERT INTO setlists (name, user_id,
+                        target_seconds, warn_seconds, song_buffer_seconds,
+                        tuning_change_seconds, break_count, break_seconds)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s) RETURNING *
+                """, (name, user_id, d["target_seconds"], d["warn_seconds"],
+                      d["song_buffer_seconds"], d["tuning_change_seconds"],
+                      d["break_count"], d["break_seconds"]))
+            row = cur.fetchone()
+        conn.commit()
+        return {
+            "id": str(row["id"]),
+            "name": row["name"],
+            "is_default": False,
+            "settings": _settings_from_row(row),
+        }
     except Exception:
         conn.rollback()
         raise
@@ -437,15 +549,12 @@ def get_setlist_share_token(*, user_id=None, band_id=None) -> str:
 def get_shared_setlist(token: str):
     """Public read-only lookup by share token.
 
-    Returns {"name", "ownerName", "songs": [...]} or None if the token is unknown.
-    Songs carry only display fields (no proposals/votes/owner identity)."""
+    Returns {"name", "ownerName", "settings", "songs": [...]} or None if the token
+    is unknown. Songs carry only display fields (no proposals/votes/owner identity)."""
     conn = get_conn()
     try:
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
-            cur.execute(
-                "SELECT id, name, band_id, user_id FROM setlists WHERE share_token = %s",
-                (token,)
-            )
+            cur.execute("SELECT * FROM setlists WHERE share_token = %s", (token,))
             sl = cur.fetchone()
             if not sl:
                 return None
@@ -477,7 +586,169 @@ def get_shared_setlist(token: str):
             """, (sl["id"],))
             songs = [_row_to_song(r) for r in cur.fetchall()]
 
-        return {"name": sl["name"], "ownerName": owner_name, "songs": songs}
+        return {
+            "name": sl["name"],
+            "ownerName": owner_name,
+            "settings": _settings_from_row(sl),
+            "songs": songs,
+        }
+    finally:
+        put_conn(conn)
+
+
+def rename_setlist(setlist_id: str, name: str, *, user_id=None, band_id=None) -> None:
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            if not _owns_setlist(cur, setlist_id, user_id=user_id, band_id=band_id):
+                raise ValueError("not found")
+            cur.execute(
+                "UPDATE setlists SET name = %s, updated_at = now() WHERE id = %s",
+                (name, setlist_id)
+            )
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        put_conn(conn)
+
+
+def delete_setlist(setlist_id: str, *, user_id=None, band_id=None) -> str:
+    """Delete a setlist. Raises ValueError if it's the owner's last one.
+    Returns the id of the owner's new default (earliest remaining) setlist."""
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            if not _owns_setlist(cur, setlist_id, user_id=user_id, band_id=band_id):
+                raise ValueError("not found")
+            if band_id:
+                cur.execute(
+                    "SELECT id FROM setlists WHERE band_id = %s ORDER BY created_at",
+                    (band_id,)
+                )
+            else:
+                cur.execute(
+                    "SELECT id FROM setlists WHERE user_id = %s ORDER BY created_at",
+                    (user_id,)
+                )
+            all_ids = [str(r[0]) for r in cur.fetchall()]
+            if len(all_ids) <= 1:
+                raise ValueError("cannot delete the last setlist")
+            cur.execute("DELETE FROM setlists WHERE id = %s", (setlist_id,))
+            remaining = [i for i in all_ids if i != setlist_id]
+        conn.commit()
+        return remaining[0]
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        put_conn(conn)
+
+
+def update_setlist_settings(setlist_id: str, settings: dict, *, user_id=None, band_id=None) -> dict:
+    """Partial-update timing settings for a setlist. Returns the updated settings dict."""
+    conn = get_conn()
+    try:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            if not _owns_setlist(cur, setlist_id, user_id=user_id, band_id=band_id):
+                raise ValueError("not found")
+            # Only update recognised keys; clamp non-negative; warn must be < target.
+            cur.execute("SELECT * FROM setlists WHERE id = %s", (setlist_id,))
+            current = dict(cur.fetchone())
+            for key in _SETTINGS_COLS:
+                if key in settings:
+                    current[key] = max(0, int(settings[key]))
+            current["warn_seconds"] = min(current["warn_seconds"], current["target_seconds"])
+            cur.execute("""
+                UPDATE setlists
+                SET target_seconds = %s, warn_seconds = %s, song_buffer_seconds = %s,
+                    tuning_change_seconds = %s, break_count = %s, break_seconds = %s,
+                    updated_at = now()
+                WHERE id = %s
+            """, (current["target_seconds"], current["warn_seconds"],
+                  current["song_buffer_seconds"], current["tuning_change_seconds"],
+                  current["break_count"], current["break_seconds"], setlist_id))
+        conn.commit()
+        return _settings_from_row(current)
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        put_conn(conn)
+
+
+def get_setlist_full(setlist_id: str) -> dict:
+    """Return {id, name, settings, entries:[{song_id, plays}]} for any setlist."""
+    conn = get_conn()
+    try:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute("SELECT * FROM setlists WHERE id = %s", (setlist_id,))
+            sl = cur.fetchone()
+            if not sl:
+                return None
+            cur.execute(
+                "SELECT song_id::text, plays FROM setlist_songs WHERE setlist_id = %s ORDER BY position",
+                (setlist_id,)
+            )
+            entries = [{"song_id": r["song_id"], "plays": r["plays"]} for r in cur.fetchall()]
+        return {
+            "id": str(sl["id"]),
+            "name": sl["name"],
+            "settings": _settings_from_row(sl),
+            "entries": entries,
+        }
+    finally:
+        put_conn(conn)
+
+
+def save_setlist_entries(setlist_id: str, entries: list) -> None:
+    """Full replace of songs in a setlist. entries: [{song_id, position, plays}]."""
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM setlist_songs WHERE setlist_id = %s", (setlist_id,))
+            if entries:
+                cur.executemany(
+                    "INSERT INTO setlist_songs (setlist_id, song_id, position, plays) VALUES (%s, %s, %s, %s)",
+                    [(setlist_id, e["song_id"], e["position"], e.get("plays", 1)) for e in entries]
+                )
+            cur.execute("UPDATE setlists SET updated_at = now() WHERE id = %s", (setlist_id,))
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        put_conn(conn)
+
+
+def set_band_time_defaults(band_id: str, defaults: dict) -> None:
+    """Partial-update band-level default timing settings."""
+    conn = get_conn()
+    try:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute("SELECT * FROM bands WHERE id = %s", (band_id,))
+            current = dict(cur.fetchone())
+            for key in _SETTINGS_COLS:
+                db_col = f"default_{key}"
+                if key in defaults:
+                    current[db_col] = max(0, int(defaults[key]))
+            current[f"default_warn_seconds"] = min(
+                current["default_warn_seconds"], current["default_target_seconds"]
+            )
+            cur.execute("""
+                UPDATE bands
+                SET default_target_seconds = %s, default_warn_seconds = %s,
+                    default_song_buffer_seconds = %s, default_tuning_change_seconds = %s,
+                    default_break_count = %s, default_break_seconds = %s
+                WHERE id = %s
+            """, (current["default_target_seconds"], current["default_warn_seconds"],
+                  current["default_song_buffer_seconds"], current["default_tuning_change_seconds"],
+                  current["default_break_count"], current["default_break_seconds"], band_id))
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
     finally:
         put_conn(conn)
 
@@ -546,7 +817,11 @@ def get_user_band(user_id: str):
     try:
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
             cur.execute("""
-                SELECT b.id, b.name, b.invite_token, b.approval_factor, bm.role
+                SELECT b.id, b.name, b.invite_token, b.approval_factor,
+                       b.default_target_seconds, b.default_warn_seconds,
+                       b.default_song_buffer_seconds, b.default_tuning_change_seconds,
+                       b.default_break_count, b.default_break_seconds,
+                       bm.role
                 FROM bands b
                 JOIN band_members bm ON bm.band_id = b.id
                 WHERE bm.user_id = %s
@@ -574,6 +849,14 @@ def get_user_band(user_id: str):
                 "name": band_row["name"],
                 "invite_token": band_row["invite_token"],
                 "approval_factor": float(band_row["approval_factor"]),
+                "time_defaults": {
+                    "target_seconds":        band_row["default_target_seconds"],
+                    "warn_seconds":          band_row["default_warn_seconds"],
+                    "song_buffer_seconds":   band_row["default_song_buffer_seconds"],
+                    "tuning_change_seconds": band_row["default_tuning_change_seconds"],
+                    "break_count":           band_row["default_break_count"],
+                    "break_seconds":         band_row["default_break_seconds"],
+                },
                 "role": band_row["role"],
                 "members": members,
             }
