@@ -657,6 +657,26 @@ showing "5/25 · need 15" — confirming size-independence. No console errors.
 **State at session end:** All changes local only (not committed, not deployed). Migration 002
 applied to the local/connected Neon DB only.
 
+### Session: Set List Sort By Feature (2026-06-04)
+
+Added a "Sort By" control to the set list toolbar. **All in `templates/index.html`.** Branch: `claude/set-list-sort-feature-fQ2Fz`, PR #12 — merged and deployed.
+
+**What was built:**
+
+- **`<select id="set-sort-by">` toolbar control** — sits next to "Group by tuning" in the set list panel header. Options: Manual order (default) / Artist A–Z / Title A–Z / Duration ↑. Styled via existing `.toolbar-select`; highlights amber (`.active`) when a non-default sort is active.
+
+- **Ephemeral sort lens** — `setListSortBy` is a view-only state variable. `setListIds` (the DB-backed order) is **never modified** by the sort. `applySongSort(arr)` returns a sorted copy of the songs array; `renderSetList()` calls it after the search filter, before the flat/grouped render branch — so one insertion covers both paths.
+
+- **Drag-to-bake** — when the user drags a card while a sort is active, the `onUpdate` handler reads the full sorted DOM order into `setListIds`, clears `setListSortBy`, and saves. Dragging is treated as "commit this arrangement." Same bake-and-clear added to `syncSetListFromDom()` (the grouped-mode drag handler).
+
+- **Compound sort with grouping** — when both "Group by tuning" and a sort are active, `applySongSort` runs on the `songs` array before it's passed to `renderSetListGrouped`, so songs within each tuning group are ordered by the chosen criterion.
+
+**New globals/helpers:** `let setListSortBy = ''` (state), `applySongSort(arr)` (pure helper before `groupSetListByTuning`).
+
+**Adjacent features considered but deferred:** descending/reverse toggle, sort-by-plays, filter-by-tuning on the set list side, `localStorage` sort persistence, position-number opacity dimming while sorted.
+
+**No DB migration needed** — pure frontend change.
+
 ## Maintenance Pattern for This File
 
 When future sessions do meaningful work in this project, ask Claude:
