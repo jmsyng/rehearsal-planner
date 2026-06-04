@@ -24,8 +24,10 @@ rehearsal-planner/
 ├── app.py              # Flask app + all API routes (songs, setlist, tunings, spotify/youtube/album-art proxies)
 ├── auth.py             # JWT validation via Neon Auth JWKS; @require_auth decorator
 ├── db.py               # Postgres CRUD (fresh connection per request — DO NOT add pooling, see Gotchas)
-├── schema.sql          # DDL for songs, set_lists, set_list_songs, user_tunings
-├── init_db.py          # Run once to apply schema.sql to the Neon DB
+├── schema.sql          # Canonical DDL — reflects current target state; used by init_db.py (fresh DBs only)
+├── init_db.py          # Run once on a FRESH database to apply schema.sql — do NOT run on existing DBs
+├── migrate.py          # Incremental migration runner — safe to run anytime; skips already-applied files
+├── migrations/         # Numbered SQL migration files (001_..., 002_...) applied by migrate.py
 ├── requirements.txt    # Python deps
 ├── vercel.json         # Vercel routing — sends all requests to api/index.py
 ├── api/index.py        # Vercel serverless entry — `from app import app`
@@ -68,12 +70,21 @@ This took several iterations to get right — read this before touching auth cod
 All app tables live in `public`; auth tables in `neon_auth` (managed by Neon, do not modify).
 
 - `neon_auth."user"` — UUID `id`, email, name, etc. (Note: `"user"` is reserved SQL — always quote it)
-- `songs` — composite PK `(id, user_id)`, FK to `neon_auth."user"(id) ON DELETE CASCADE`
-- `set_lists` — one row per user (single active set list)
-- `set_list_songs` — ordered join, references `songs(id, user_id)`
+- `songs` — UUID PK `id`; `external_id TEXT` (Spotify track ID, or NULL for custom songs); exactly one of `band_id`/`user_id` set (CHECK constraint); `added_by UUID`; no `plays` column
+- `setlists` — UUID PK; `name TEXT DEFAULT 'Main Set'`; `band_id XOR user_id`; multiple per band/user supported
+- `setlist_songs` — `(setlist_id, song_id)` composite PK; `position INTEGER`; `plays INTEGER`
+- `bands`, `band_members` — band + membership
+- `song_proposals`, `song_votes` — voting system
+- `notifications`, `notification_prefs` — per-user notification settings
+- `user_profiles` — display name + roles (app-side; Neon Auth owns `neon_auth."user"`)
 - `user_tunings` — custom tunings beyond the 4 hardcoded defaults
+- `schema_migrations` — tracks which migration files have been applied (managed by `migrate.py`)
 
-`user_id` is **UUID** everywhere (matches `neon_auth."user".id`), not TEXT. The first iteration used TEXT and FK'd to `neon_auth.users_sync` (a Stack-Auth-era table that doesn't exist in Better Auth) — both wrong.
+`user_id` is **UUID** everywhere. **Old tables `set_lists`, `set_list_songs`, `band_set_list_songs` were removed in migration 001** — replaced by `setlists`/`setlist_songs`. Don't reference them.
+
+Duplicate-guard partial unique indexes prevent the same Spotify song being added twice to one library:
+- `songs_band_external_uniq` on `(band_id, external_id) WHERE band_id IS NOT NULL AND external_id IS NOT NULL`
+- `songs_user_external_uniq` on `(user_id, external_id) WHERE user_id IS NOT NULL AND external_id IS NOT NULL`
 
 ## API Routes
 
@@ -179,11 +190,12 @@ Env vars on Vercel are set via the dashboard (Project → Settings → Environme
 | Task | How |
 |---|---|
 | Run locally | `python app.py` |
-| Apply schema changes | Edit `schema.sql` → `python init_db.py` |
+| Apply schema changes to existing DB | Write `migrations/NNN_description.sql` → `python migrate.py` |
+| Create a fresh DB from scratch | `python init_db.py` (NOT for existing DBs) |
 | Deploy | `git push origin main` |
 | Watch Vercel build/runtime logs | Vercel dashboard → Project → Deployments → click latest |
-| Reset a user's data | SQL: `DELETE FROM songs WHERE user_id = '...';` (cascades to set_list_songs) |
-| Wipe all app data (not auth) | SQL: `TRUNCATE songs, set_lists, set_list_songs, user_tunings CASCADE;` |
+| Reset a user's data | SQL: `DELETE FROM songs WHERE user_id = '...';` (cascades to setlist_songs) |
+| Wipe all app data (not auth) | SQL: `TRUNCATE bands, songs, setlists, user_tunings, user_profiles, notifications CASCADE;` |
 | Inspect Neon DB | Neon Console → SQL Editor |
 
 ## Conventions
@@ -552,6 +564,47 @@ Removed the duplicate panel title on mobile and added filter/grouping toolbars t
 **PR state at session end:** Two commits on `library-setlist-toolbars` — `441023f` (toolbar feature) and `03d332c` (CLAUDE.md guardrail). Not yet merged. Preview testing requires adding the branch's Vercel preview origin to Neon Trusted Origins first.
 
 **Uncommitted:** `app.py` has a local configurable-port change (`python3 app.py [port]` or `$PORT`) that wasn't part of this session and wasn't put in the PR.
+
+### Session: Multi-band/multi-setlist schema migration + code alignment (2026-05-31)
+
+Completed the code changes to align with the new database schema (designed and migrated in the prior summarized session). Committed and deployed.
+
+**What landed in this session:**
+
+- **`app.py` — three fixes:**
+  - `api_add_song`: `db.create_proposal(band_id, song["id"], ...)` → `saved["id"]`; matching band-song lookup loop likewise. The proposal must reference the DB UUID, not the client string the browser sent.
+  - `get_initial_songs`: was discarding the return value of `db.upsert_song()`, so the browser got back `{"id": "song-0", ...}` placeholder strings. Now captures `saved` and returns it — browser sees real UUIDs from the first load.
+  - Validation relaxed: only `name` is required to add a song; `id` is optional. Custom songs have no external identifier, so requiring it was wrong.
+
+- **`templates/index.html` — three fixes:**
+  - `addFromSpotify`: `id: \`song-spotify-${Date.now()}\`` → `id: track.id` (real Spotify track ID). Stored as `external_id`; enables duplicate guard on re-add.
+  - `addSpotifySong` (Add Song modal): same ID fix; also added missing `spotifyUrl: track.spotify_url` to `extra` (was silently absent from the modal path).
+  - `addCustomSong`: removed `id` field entirely — no `id` sent → `external_id = NULL` in DB. Intentional: custom songs are allowed to be duplicated by name.
+
+**The rule going forward — song IDs:**
+- Song `id` is **always server-assigned (a UUID)**. The frontend must use the `id` in the API response — never generate its own.
+- Spotify songs: send `id: track.id` in the add payload. Server stores it as `external_id`; returns a UUID as `id`.
+- Custom songs: omit `id`. Server assigns a UUID; `external_id` stays NULL.
+
+**Migration tooling (added in prior session, deployed here):**
+- `migrate.py` — apply any unapplied `migrations/*.sql` files; tracks state in `schema_migrations`; all-or-nothing transactions; safe to run any time.
+- `init_db.py` — **fresh databases only**. Running it on an existing DB will silently skip tables that already exist but won't apply incremental changes — use `migrate.py` for that.
+- For new schema changes: write `migrations/NNN_description.sql`, run `migrate.py` locally to test, then deploy. Update `schema.sql` to match so it stays the canonical description.
+
+**`db.py` (full rewrite completed in prior session, deployed here):**
+- All public function names/signatures preserved — `app.py` callers were minimally disrupted.
+- `upsert_song`: `song['id']` is a UUID → UPDATE existing row; otherwise → CREATE with incoming as `external_id` (ON CONFLICT → graceful upsert).
+- `_default_setlist_id()`: hides multi-setlist schema behind single-setlist behaviour for backward compat. Schema supports multiple named setlists per band/user; UI still uses one — multi-setlist UI is future work.
+- `plays` is pulled from `setlist_songs` via a correlated subquery (`_PLAYS_SUBQUERY`), not from `songs` (column was removed in migration 001).
+
+**Deployment:**
+- Committed everything on `library-setlist-toolbars`, merged to `main` (fast-forward), pushed → Vercel auto-deployed.
+- Migration 001 was already applied to the Neon DB before this deploy (done in prior session). **Never deploy schema-breaking code before running the migration.**
+
+**Stale documentation updated in this session:**
+- Database Schema section — now reflects `setlists`/`setlist_songs`, removed mentions of `set_lists`/`set_list_songs`/`band_set_list_songs`
+- File Layout — added `migrate.py` and `migrations/`
+- Common Tasks — corrected "Apply schema changes" and "Wipe all app data" rows
 
 ## Maintenance Pattern for This File
 
