@@ -410,6 +410,78 @@ def save_band_setlist(band_id: str, entries: list) -> None:
         put_conn(conn)
 
 
+# ── Public read-only sharing ─────────────────────────────────────────────────────
+#
+# Every setlist carries a permanent, unguessable share_token (like bands.invite_token).
+# get_setlist_share_token returns it for the owner (creating the default setlist on
+# demand). get_shared_setlist resolves a token to a public, read-only payload — only
+# display fields, no proposals/votes/emails/library songs.
+
+def get_setlist_share_token(*, user_id=None, band_id=None) -> str:
+    """Return the share token of the owner's default setlist, creating it if needed."""
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            sid = _default_setlist_id(cur, user_id=user_id, band_id=band_id, create=True)
+            cur.execute("SELECT share_token FROM setlists WHERE id = %s", (sid,))
+            token = cur.fetchone()[0]
+        conn.commit()  # _default_setlist_id may have inserted a new setlist
+        return token
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        put_conn(conn)
+
+
+def get_shared_setlist(token: str):
+    """Public read-only lookup by share token.
+
+    Returns {"name", "ownerName", "songs": [...]} or None if the token is unknown.
+    Songs carry only display fields (no proposals/votes/owner identity)."""
+    conn = get_conn()
+    try:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(
+                "SELECT id, name, band_id, user_id FROM setlists WHERE share_token = %s",
+                (token,)
+            )
+            sl = cur.fetchone()
+            if not sl:
+                return None
+
+            # Friendly owner label: band name, or the solo owner's display name.
+            if sl["band_id"]:
+                cur.execute("SELECT name FROM bands WHERE id = %s", (sl["band_id"],))
+                row = cur.fetchone()
+                owner_name = row["name"] if row else ""
+            else:
+                cur.execute("""
+                    SELECT COALESCE(up.display_name, nu.name, nu.email) AS name
+                    FROM neon_auth."user" nu
+                    LEFT JOIN user_profiles up ON up.user_id = nu.id
+                    WHERE nu.id = %s
+                """, (sl["user_id"],))
+                row = cur.fetchone()
+                owner_name = row["name"] if row else ""
+
+            # Ordered setlist songs — display fields only, plays from setlist_songs.
+            cur.execute("""
+                SELECT s.id, s.name, s.artist, s.duration_raw, s.duration_sec,
+                       s.album_art, s.tuning, s.recorded_tuning, s.our_tuning, s.status,
+                       s.spotify_url, s.youtube_link, ss.plays
+                FROM setlist_songs ss
+                JOIN songs s ON s.id = ss.song_id
+                WHERE ss.setlist_id = %s
+                ORDER BY ss.position
+            """, (sl["id"],))
+            songs = [_row_to_song(r) for r in cur.fetchall()]
+
+        return {"name": sl["name"], "ownerName": owner_name, "songs": songs}
+    finally:
+        put_conn(conn)
+
+
 # ── Tunings ────────────────────────────────────────────────────────────────────
 
 def get_tunings(user_id: str) -> list:

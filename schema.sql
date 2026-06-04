@@ -93,12 +93,14 @@ CREATE UNIQUE INDEX IF NOT EXISTS songs_user_external_uniq
 -- Multiple setlists per band or user are supported.
 
 CREATE TABLE IF NOT EXISTS setlists (
-    id         UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
-    name       TEXT        NOT NULL DEFAULT 'Main Set',
-    band_id    UUID        REFERENCES bands(id)             ON DELETE CASCADE,
-    user_id    UUID        REFERENCES neon_auth."user"(id)  ON DELETE CASCADE,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    id          UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+    name        TEXT        NOT NULL DEFAULT 'Main Set',
+    band_id     UUID        REFERENCES bands(id)             ON DELETE CASCADE,
+    user_id     UUID        REFERENCES neon_auth."user"(id)  ON DELETE CASCADE,
+    -- Permanent, unguessable token for the public read-only share link (always present).
+    share_token TEXT        UNIQUE NOT NULL DEFAULT gen_random_uuid()::text,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
     CONSTRAINT setlist_has_one_owner CHECK (
         (band_id IS NOT NULL AND user_id IS NULL) OR
         (band_id IS NULL     AND user_id IS NOT NULL)
