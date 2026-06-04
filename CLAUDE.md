@@ -657,6 +657,63 @@ showing "5/25 · need 15" — confirming size-independence. No console errors.
 **State at session end:** All changes local only (not committed, not deployed). Migration 002
 applied to the local/connected Neon DB only.
 
+### Session: Song Status UI/UX (2026-06-04)
+
+Made the song-status chip interactive (it was read-only) and fixed a broken solo-edit path.
+Branch `claude/song-status-ui-ux-nDeVx`, **PR #11**. Migration 004 already applied to prod DB.
+
+**The bug that prompted this:** the frontend read/wrote `extra.songStatus`, but the backend only
+persists `extra.Status` → `songs.status` column (`db._song_fields` maps `extra.Status`,
+`db._row_to_song` maps it back; `songs.status` default is `'For Consideration'`). So the old solo
+expanded-card `<select>` silently dropped every status change, and saving even reset status to the
+default. **Lesson: status persists ONLY via `extra.Status`. `songStatus` is dead — never reintroduce it.**
+
+**What was built (all in `templates/index.html` unless noted):**
+
+- **Canonical `STATUSES` constant** (~line 2136) = single source of truth `[{value,label,cls}]` for
+  Active/Learning/Proposed/Resting/Shelved, plus a separate `ARCHIVED`. Derives `STATUS_BY_VALUE`,
+  `STATUS_ORDER` (used by the library filter), `UNSET_STATUS = 'For Consideration'`, and helpers
+  `statusInfoFor(v)` / `isUnset(v)`. `'For Consideration'` is treated as the **unset** state (not in
+  the picker) — every new song defaults to it.
+- **`effectiveStatus(song)`** rewritten: a manual/voting-written `extra.Status` wins; if it's still
+  `'For Consideration'` it falls through to the band proposal label (pending→Proposed,
+  approved→Learning, rejected→Resting); else unset. This is the **manual-wins** model the user chose —
+  band songs are now manually editable and a manual pick overrides the voting label.
+- **Clickable chip + popover.** The status chip on the collapsed card is now a `<button>`
+  (`.status-chip-btn`) that opens a singleton popover (`openStatusPopover`/`closeStatusPopover`,
+  near the menu helpers ~line 4045) appended to `document.body`, positioned via `getBoundingClientRect`.
+  Picking a status calls `setSongStatus(song, value)` → sets `extra.Status`, patches the live
+  `libraryData` entry, fire-and-forget `apiUpdateSong`, optimistic re-render, toast. Unset songs show
+  a faint dashed **`+ Status`** affordance; a **Clear status** item resets to `UNSET_STATUS`. Dismissal
+  wired into the existing outside-click/Escape listeners; `renderLibrary`/`renderSetList` call
+  `closeStatusPopover()` at the top so a `pollNotifications` re-render can't orphan it. The card
+  click-to-expand handler already ignores `button` clicks, so the chip doesn't toggle expansion.
+- **Expanded-card `<select>`** kept as a secondary editor, rebuilt from `STATUSES`, `!_bandData` guard
+  removed, now calls `setSongStatus` on change (persists immediately like the popover).
+- **"In Rotation" → "Active" rename.** All 37 seed songs in `app.py` (`get_initial_songs`) said
+  `"status": "In Rotation"`; replaced with `"Active"`. `migrations/004_rename_in_rotation_to_active.sql`
+  (`UPDATE songs SET status='Active' WHERE status='In Rotation'`) handles existing rows.
+  `statusInfoFor` also aliases `'In Rotation'` → Active as a belt-and-suspenders fallback.
+- **Swapped Active/Learning chip colors:** Active is now green (`#50c878`), Learning is now purple
+  (`var(--accent)`). CSS `.status-badge` variants at ~line 560; added `.shelved`, `.archived`,
+  `.status-unset`, and `.status-popover*` styles.
+- **Set-list guard in `setSongStatus`:** if the song is in the set list and the new status is anything
+  other than `Active` or `Learning`, a `confirm()` asks whether to remove it from the set list;
+  confirming filters `setListIds` + `saveSetlistDebounced()`.
+
+**Verification:** could NOT run the app in the remote container (no `.env`/DB). Static checks only:
+inline JS passes `node --check` (extract `<script>` blocks, concat, check), `grep songStatus` → 0 hits,
+CSS tokens exist. **End-to-end (solo persistence survives reload, band manual-override-wins, setlist
+prompt) was NOT runtime-verified** — should be checked on a Vercel preview or locally before relying on it.
+
+**Process note — running migrations from a remote/mobile session:** the remote container has no
+`DATABASE_URL`, so `migrate.py` can't run there. For a trivial one-statement migration the user ran the
+SQL directly in the **Neon Console SQL Editor** (works on mobile). Alternatives: run `migrate.py` from
+the local terminal, or paste `DATABASE_URL` into the remote session.
+
+**State at session end:** Committed + pushed to the branch; **PR #11 open, not merged**. Migration 004
+applied to prod DB. Merge → `git push origin main` deploys.
+
 ## Maintenance Pattern for This File
 
 When future sessions do meaningful work in this project, ask Claude:
