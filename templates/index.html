@@ -2830,6 +2830,7 @@ function makeSongCard(song, inSetList) {
 
             // Recreate all tuning dropdowns to show new value
             renderLibrary();
+            renderSetList();
             return;
           }
         }
@@ -4289,6 +4290,7 @@ async function deleteTuning(tuning) {
     if (idx !== -1) allTuningValues.splice(idx, 1);
     renderSettingsTunings();
     renderLibrary();
+    renderSetList();
     showToast('✓ Tuning removed');
   } catch (err) {
     showToast('Failed to remove tuning');
@@ -4306,6 +4308,7 @@ async function addTuningFromSettings() {
     input.value = '';
     renderSettingsTunings();
     renderLibrary();
+    renderSetList();
     showToast('✓ Tuning added');
   } catch (err) {
     showToast('Failed to add tuning');
