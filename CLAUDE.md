@@ -657,6 +657,28 @@ showing "5/25 · need 15" — confirming size-independence. No console errors.
 **State at session end:** All changes local only (not committed, not deployed). Migration 002
 applied to the local/connected Neon DB only.
 
+### Session: Group-by-Tuning Enhancements (2026-06-04)
+
+Upgraded the Set List "Group by tuning" feature from a one-shot reorder into a persistent, interactive grouping mode. **All changes in `templates/index.html` only.** Branch: `claude/group-by-tuning-enhancements-eRT4b`.
+
+**What changed:**
+
+- **Sticky grouped mode.** `#set-group-by` dropdown no longer resets to `''` after selecting "Group by tuning". It stays selected and shows the amber `.active` styling. "No grouping" option exits the mode, clears collapsed state, and returns to flat rendering. Two new state vars: `let setListGroupedByTuning = false` and `let collapsedTunings = new Set()`.
+
+- **Group header rows.** In grouped mode, `renderSetList` delegates to a new `renderSetListGrouped(list, songs)` function. Each tuning gets a `.tuning-group` container with a `.tuning-group-header` row: a `⠿` group drag handle, an amber tuning label, a song-count badge, and a `❯` collapse chevron.
+
+- **Collapsible groups.** Clicking the chevron toggles the tuning key in `collapsedTunings` and re-renders. Collapsed groups: songs hidden (`display: none` on `.tuning-group-songs`), header shows a layered `box-shadow` "stacked cards" shadow beneath it. State persists across re-renders within the session.
+
+- **Group-level drag-and-drop.** An outer `Sortable.create(list, { handle: '.group-drag-handle' })` makes entire groups draggable. Each group's `.tuning-group-songs` div has its own inner SortableJS (`group: 'songs'`) for song reordering within and between groups. After any drag event, `syncSetListFromDom()` rebuilds `setListIds` by walking the live DOM (groups in order → songs in order) and calls `saveSetlistDebounced()`. This avoids index-arithmetic bugs that come from tracking `evt.newIndex` across nested containers.
+
+- **`renderSetList` dropdown sync.** At the top of `renderSetList`, the dropdown value and `.active` class are always set from `setListGroupedByTuning`, so any call path (data reload, song add, etc.) stays in sync with the current mode.
+
+- **Flat mode untouched.** The existing flat-mode code path (song cards + single SortableJS) is the unchanged `else` branch; no flat-mode behaviour was altered.
+
+**Key new functions:** `renderSetListGrouped(list, songs)`, `syncSetListFromDom()`.
+
+**State at session end:** Committed on `claude/group-by-tuning-enhancements-eRT4b`, pushed. Not yet merged to `main` / deployed.
+
 ## Maintenance Pattern for This File
 
 When future sessions do meaningful work in this project, ask Claude:
