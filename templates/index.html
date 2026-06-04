@@ -2079,6 +2079,12 @@
           <option value="">No grouping</option>
           <option value="tuning">Group by tuning</option>
         </select>
+        <select class="toolbar-select" id="set-sort-by" title="Sort set list" aria-label="Sort set list">
+          <option value="">Manual order</option>
+          <option value="artist">Artist A–Z</option>
+          <option value="title">Title A–Z</option>
+          <option value="duration">Duration ↑</option>
+        </select>
       </div>
       <span class="spacer"></span>
       <span class="count" id="setlist-count">0 songs</span>
@@ -2153,6 +2159,7 @@ function isUnset(v) { return !v || v === UNSET_STATUS; }
 
 let setListGroupedByTuning = false;  // sticky grouped mode
 let collapsedTunings = new Set();    // tuning keys currently collapsed
+let setListSortBy = '';              // '' | 'artist' | 'title' | 'duration'
 
 // Effective status used by the badge + the Library status filter.
 // A manual (or voting-written) Status wins; 'For Consideration' falls through to the
@@ -3168,6 +3175,20 @@ function applyNameMarquee() {
   });
 }
 
+// Apply an ephemeral sort lens to an array of song objects without touching setListIds.
+function applySongSort(arr) {
+  if (!setListSortBy) return arr;
+  const copy = arr.slice();
+  if (setListSortBy === 'artist') {
+    copy.sort((a, b) => (a.extra?.Artist || '').localeCompare(b.extra?.Artist || ''));
+  } else if (setListSortBy === 'title') {
+    copy.sort((a, b) => a.name.localeCompare(b.name));
+  } else if (setListSortBy === 'duration') {
+    copy.sort((a, b) => (a.duration_seconds || 0) - (b.duration_seconds || 0));
+  }
+  return copy;
+}
+
 // Set List: reorder ids so same-tuning songs are adjacent, then persist.
 // Stable — preserves first-appearance order of both groups and members.
 function groupSetListByTuning() {
@@ -3193,11 +3214,16 @@ function renderSetList() {
   const list = document.getElementById('setlist-list');
   list.innerHTML = '';
 
-  // Keep dropdown in sync with grouped state
+  // Keep dropdowns in sync with view state
   const groupSel = document.getElementById('set-group-by');
   if (groupSel) {
     groupSel.value = setListGroupedByTuning ? 'tuning' : '';
     groupSel.classList.toggle('active', setListGroupedByTuning);
+  }
+  const sortSel = document.getElementById('set-sort-by');
+  if (sortSel) {
+    sortSel.value = setListSortBy;
+    sortSel.classList.toggle('active', !!setListSortBy);
   }
 
   let songs = setListIds.map(songById).filter(Boolean);
@@ -3210,6 +3236,9 @@ function renderSetList() {
       s.extra?.Artist?.toLowerCase().includes(setListSearchText.toLowerCase())
     );
   }
+
+  // Apply ephemeral sort lens (does not modify setListIds)
+  songs = applySongSort(songs);
 
   const emptyEl = document.getElementById('setlist-empty') || (() => {
     const d = document.createElement('div');
@@ -3257,9 +3286,17 @@ function renderSetList() {
         renderLibrary();
       },
       onUpdate(evt) {
-        const id = evt.item.dataset.id;
-        setListIds = setListIds.filter(i => i !== id);
-        setListIds.splice(evt.newIndex, 0, id);
+        if (setListSortBy) {
+          // Sorted view active — bake the displayed DOM order into setListIds and clear the sort.
+          const newIds = [];
+          evt.to.querySelectorAll('.song-card').forEach(card => newIds.push(card.dataset.id));
+          setListIds = newIds;
+          setListSortBy = '';
+        } else {
+          const id = evt.item.dataset.id;
+          setListIds = setListIds.filter(i => i !== id);
+          setListIds.splice(evt.newIndex, 0, id);
+        }
         saveSetlistDebounced();
         renderSetList();
       },
@@ -3289,6 +3326,7 @@ function syncSetListFromDom() {
     });
   });
   setListIds = newIds;
+  setListSortBy = '';  // drag bakes the order; clear the sort lens
   saveSetlistDebounced();
 }
 
@@ -4785,6 +4823,14 @@ document.getElementById('voting-modal-close').addEventListener('click', () => {
         renderSetList();
         renderLibrary();
       }
+    });
+  }
+
+  const setSortSel = document.getElementById('set-sort-by');
+  if (setSortSel) {
+    setSortSel.addEventListener('change', e => {
+      setListSortBy = e.target.value;
+      renderSetList();
     });
   }
 })();
