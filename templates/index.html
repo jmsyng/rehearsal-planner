@@ -561,6 +561,20 @@
     .status-badge.proposed  { background: rgba(245,161,66,0.18);  color: var(--setlist-accent); }
     .status-badge.resting   { background: rgba(180,80,80,0.15);   color: #c87878; }
     .status-badge.active    { background: rgba(124,106,247,0.18); color: var(--accent); }
+    .status-badge.shelved   { background: rgba(95,184,217,0.15);  color: var(--library-accent); }
+    .status-badge.archived  { background: rgba(240,82,82,0.15);   color: var(--red); }
+    .status-badge.status-unset { background: transparent; color: var(--text-dim); border: 1px dashed var(--border); text-transform: none; }
+
+    /* Clickable status chip + quick-pick popover */
+    .status-chip-btn { border: 0; cursor: pointer; font: inherit; font-size: 10px; font-weight: 700;
+      text-transform: uppercase; letter-spacing: 0.4px; line-height: 1; }
+    .status-badge.status-unset.status-chip-btn { border: 1px dashed var(--border); }
+    .status-popover { background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
+      padding: 4px; box-shadow: 0 8px 24px rgba(0,0,0,.4); display: flex; flex-direction: column; gap: 2px; }
+    .status-popover-item { background: transparent; border: 0; text-align: left; padding: 4px 6px;
+      border-radius: 6px; cursor: pointer; }
+    .status-popover-item:hover, .status-popover-item.selected { background: var(--border); }
+    .status-popover-item.status-clear { color: var(--text-dim); font-size: 12px; }
 
     .meta-added-by {
       font-size: 11px;
@@ -2119,19 +2133,37 @@ let allTuningValues = ['E standard', 'Eb', 'Drop D', 'Drop C#'];  // available t
 let libraryTuningFilter = '';   // '' = all tunings
 let libraryStatusFilter = '';   // '' = all statuses
 let libraryShowArchived = false;// when false, Archived songs are hidden
-const STATUS_ORDER = ['Active', 'Learning', 'Proposed', 'Resting', 'Shelved', 'Archived'];
+// Canonical status list — single source of truth for the picker, badges, and filter.
+const STATUSES = [
+  { value: 'Active',   label: 'Active',   cls: 'active' },
+  { value: 'Learning', label: 'Learning', cls: 'learning' },
+  { value: 'Proposed', label: 'Proposed', cls: 'proposed' },
+  { value: 'Resting',  label: 'Resting',  cls: 'resting' },
+  { value: 'Shelved',  label: 'Shelved',  cls: 'shelved' },
+];
+const ARCHIVED = { value: 'Archived', label: 'Archived', cls: 'archived' };
+const STATUS_BY_VALUE = Object.fromEntries([...STATUSES, ARCHIVED].map(s => [s.value, s]));
+const STATUS_ORDER = [...STATUSES.map(s => s.value), 'Archived'];  // filter consumes this as string[]
+const UNSET_STATUS = 'For Consideration';   // backend default == "no status yet"
+function statusInfoFor(v) {
+  return STATUS_BY_VALUE[v] || { value: v, label: v, cls: v.toLowerCase().replace(/\s+/g, '-') };
+}
+function isUnset(v) { return !v || v === UNSET_STATUS; }
 
 let setListGroupedByTuning = false;  // sticky grouped mode
 let collapsedTunings = new Set();    // tuning keys currently collapsed
 
-// Effective status used by the badge + the Library status filter
+// Effective status used by the badge + the Library status filter.
+// A manual (or voting-written) Status wins; 'For Consideration' falls through to the
+// band proposal label; otherwise the song is unset.
 function effectiveStatus(song) {
-  if (song.extra?.Status === 'Archived') return 'Archived';
+  const s = song.extra?.Status;
+  if (s && s !== UNSET_STATUS) return s;
   const ps = song.extra?.proposalStatus;
   if (ps === 'pending')  return 'Proposed';
-  if (ps === 'approved') return 'Learning';
   if (ps === 'rejected') return 'Resting';
-  return song.extra?.songStatus || song.extra?.Status || '';
+  if (ps === 'approved') return 'Learning';
+  return s || '';
 }
 
 let _bandData = null;       // {id, name, invite_token, role, members:[...]}
@@ -2586,19 +2618,21 @@ function makeSongCard(song, inSetList) {
   const durText = document.createElement('span');
   durText.textContent = song.duration_raw || '—';
   durEl.appendChild(durText);
-  const ps = song.extra?.proposalStatus;
-  const ss = song.extra?.songStatus;
-  let statusInfo = null;
-  if (ps === 'pending')  statusInfo = { label: 'Proposed', cls: 'proposed' };
-  else if (ps === 'approved') statusInfo = { label: 'Learning', cls: 'learning' };
-  else if (ps === 'rejected') statusInfo = { label: 'Resting',  cls: 'resting'  };
-  else if (ss) statusInfo = { label: ss, cls: ss.toLowerCase() };
-  if (statusInfo) {
-    const statusBadge = document.createElement('span');
-    statusBadge.className = `status-badge ${statusInfo.cls}`;
-    statusBadge.textContent = statusInfo.label;
-    durEl.appendChild(statusBadge);
+  // Clickable status chip — opens a quick-pick popover to change the status.
+  // When unset (new songs default to 'For Consideration'), shows a faint "+ Status" affordance.
+  const statusVal = effectiveStatus(song);
+  const chip = document.createElement('button');
+  if (isUnset(statusVal)) {
+    chip.className = 'status-badge status-unset status-chip-btn';
+    chip.textContent = '+ Status';
+  } else {
+    const info = statusInfoFor(statusVal);
+    chip.className = `status-badge ${info.cls} status-chip-btn`;
+    chip.textContent = info.label;
   }
+  chip.title = 'Change status';
+  chip.addEventListener('click', e => { e.stopPropagation(); openStatusPopover(chip, song); });
+  durEl.appendChild(chip);
 
   info.append(artistEl, nameEl, durEl);
 
@@ -2885,24 +2919,25 @@ function makeSongCard(song, inSetList) {
       }
     }, song.extra?.RecordedTuning);
 
-    // Solo user status field (band users have status driven by voting)
-    if (!_bandData) {
+    // Status field — secondary editor (the collapsed-card chip is the primary path).
+    // Persists immediately on change, same as the popover.
+    {
       const statusField = document.createElement('div');
       statusField.className = 'expanded-field expanded-field-inline';
       const statusLabel = document.createElement('label');
       statusLabel.textContent = 'Status';
       const statusSelect = document.createElement('select');
       statusSelect.style.cssText = 'padding: 3px 6px; border-radius: 4px; border: 1px solid var(--border); background: var(--surface); color: var(--text); font-size: 12px;';
-      ['—', 'Active', 'Learning', 'Proposed', 'Resting', 'Shelved'].forEach(opt => {
+      const currentStatus = effectiveStatus(song);
+      [{ value: '', label: '—' }, ...STATUSES].forEach(opt => {
         const o = document.createElement('option');
-        o.value = opt === '—' ? '' : opt;
-        o.textContent = opt;
-        if ((song.extra?.songStatus || '') === o.value) o.selected = true;
+        o.value = opt.value;
+        o.textContent = opt.label;
+        if (currentStatus === opt.value) o.selected = true;
         statusSelect.appendChild(o);
       });
       statusSelect.addEventListener('change', e => {
-        song.extra = song.extra || {};
-        song.extra.songStatus = e.target.value || undefined;
+        setSongStatus(song, e.target.value || UNSET_STATUS);
       });
       statusField.append(statusLabel, statusSelect);
       expandedSection.appendChild(statusField);
@@ -2923,7 +2958,7 @@ function makeSongCard(song, inSetList) {
       if (live && live !== song) {
         live.extra.OurTuning = song.extra.OurTuning;
         live.extra.RecordedTuning = song.extra.RecordedTuning;
-        if (song.extra.songStatus !== undefined) live.extra.songStatus = song.extra.songStatus;
+        if (song.extra.Status !== undefined) live.extra.Status = song.extra.Status;
       }
       apiUpdateSong(song);
       showToast('Changes saved');
@@ -2980,6 +3015,7 @@ function makeSongCard(song, inSetList) {
 
 
 function renderLibrary() {
+  closeStatusPopover();   // avoid orphaning a popover anchored to a card we're about to replace
   const list = document.getElementById('library-list');
   list.innerHTML = '';
 
@@ -3152,6 +3188,7 @@ function groupSetListByTuning() {
 }
 
 function renderSetList() {
+  closeStatusPopover();   // avoid orphaning a popover anchored to a card we're about to replace
   const list = document.getElementById('setlist-list');
   list.innerHTML = '';
 
@@ -4006,6 +4043,47 @@ function closeAllMenus() {
 // Backwards-compat alias (some call sites use the old name)
 function closeAppMenu() { closeAllMenus(); }
 
+// ── Song status quick-pick popover ───────────────────────────────────────────────
+let _statusPopover = null;
+function closeStatusPopover() {
+  if (_statusPopover) { _statusPopover.remove(); _statusPopover = null; }
+}
+function openStatusPopover(anchorEl, song) {
+  closeStatusPopover();
+  closeAllMenus();
+  const pop = document.createElement('div');
+  pop.className = 'status-popover';
+  const current = effectiveStatus(song);
+  STATUSES.forEach(s => {
+    const item = document.createElement('button');
+    item.className = 'status-popover-item' + (s.value === current ? ' selected' : '');
+    item.innerHTML = `<span class="status-badge ${s.cls}">${s.label}</span>`;
+    item.addEventListener('click', e => { e.stopPropagation(); setSongStatus(song, s.value); closeStatusPopover(); });
+    pop.appendChild(item);
+  });
+  if (!isUnset(current)) {
+    const clr = document.createElement('button');
+    clr.className = 'status-popover-item status-clear';
+    clr.textContent = 'Clear status';
+    clr.addEventListener('click', e => { e.stopPropagation(); setSongStatus(song, UNSET_STATUS); closeStatusPopover(); });
+    pop.appendChild(clr);
+  }
+  document.body.appendChild(pop);
+  const r = anchorEl.getBoundingClientRect();
+  pop.style.cssText += `position:absolute; top:${r.bottom + window.scrollY + 4}px; left:${r.left + window.scrollX}px; z-index:1000;`;
+  _statusPopover = pop;
+}
+function setSongStatus(song, value) {
+  song.extra = song.extra || {};
+  song.extra.Status = value;
+  const live = libraryData.find(s => s.id === song.id);
+  if (live && live !== song) { live.extra = live.extra || {}; live.extra.Status = value; }
+  apiUpdateSong(live || song);   // fire-and-forget PUT, optimistic UI
+  renderLibrary();
+  renderSetList();
+  showToast('Status updated');
+}
+
 function updateMenuIdentity() {
   const name = _userProfile?.display_name || _userEmail || '';
   const nameEl = document.getElementById('menu-identity-name');
@@ -4033,10 +4111,11 @@ function avatarColorFor(seed) {
 
 // Close menus on outside-click or Escape
 document.addEventListener('click', (e) => {
+  if (!e.target.closest('.status-popover, .status-chip-btn')) closeStatusPopover();
   if (e.target.closest('#band-menu, #band-menu-btn, #user-menu, #user-avatar-btn')) return;
   closeAllMenus();
 });
-document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeAllMenus(); });
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') { closeAllMenus(); closeStatusPopover(); } });
 
 // ── Band Settings Modal ──────────────────────────────────────────────────────────
 
