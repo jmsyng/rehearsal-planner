@@ -857,7 +857,16 @@
       font-size: 14px; font-weight: 600; margin-bottom: 2px;
       display: flex; align-items: center; gap: 6px; min-width: 0;
     }
-    .song-name > span:first-child { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+    .song-name-wrap { overflow: hidden; flex: 1; min-width: 0; }
+    .song-name-wrap > span { display: inline-block; white-space: nowrap; }
+    .song-name-wrap > span.is-scrolling {
+      animation: song-name-marquee var(--scroll-dur, 5s) ease-in-out 1s infinite;
+    }
+    @keyframes song-name-marquee {
+      0%, 25%  { transform: translateX(0); }
+      45%, 55% { transform: translateX(var(--scroll-offset, 0px)); }
+      80%, 100% { transform: translateX(0); }
+    }
     .song-dur { font-size: 12px; color: var(--text-dim); display: flex; align-items: center; gap: 6px; }
 
     .plays-control {
@@ -989,6 +998,7 @@
 
 
     .tuning-badge {
+      flex-shrink: 0;
       font-size: 10px;
       font-weight: 600;
       padding: 2px 6px;
@@ -2556,9 +2566,12 @@ function makeSongCard(song, inSetList) {
   const nameEl = document.createElement('div');
   nameEl.className = 'song-name';
   nameEl.title = song.name;
+  const nameWrap = document.createElement('div');
+  nameWrap.className = 'song-name-wrap';
   const nameText = document.createElement('span');
   nameText.textContent = song.name;
-  nameEl.appendChild(nameText);
+  nameWrap.appendChild(nameText);
+  nameEl.appendChild(nameWrap);
   const tuning = song.extra?.OurTuning || song.extra?.Tuning;
   if (tuning) {
     const tuningBadge = document.createElement('span');
@@ -3063,6 +3076,7 @@ function renderLibrary() {
     handle: '.drag-handle',
     onEnd(evt) { /* library is read-only order */ },
   });
+  requestAnimationFrame(applyNameMarquee);
 }
 
 // Keep the Library toolbar dropdowns in sync with the songs actually present
@@ -3100,6 +3114,21 @@ function rebuildSelect(sel, values, current, allLabel) {
   });
   sel.value = current || '';
   sel.classList.toggle('active', !!current);
+}
+
+function applyNameMarquee() {
+  document.querySelectorAll('.song-name-wrap').forEach(wrap => {
+    const span = wrap.querySelector('span');
+    if (!span || !wrap.clientWidth) return;
+    const overflow = span.scrollWidth - wrap.clientWidth;
+    if (overflow > 4) {
+      span.style.setProperty('--scroll-offset', `-${overflow}px`);
+      span.style.setProperty('--scroll-dur', `${Math.max(3, overflow / 20).toFixed(1)}s`);
+      span.classList.add('is-scrolling');
+    } else {
+      span.classList.remove('is-scrolling');
+    }
+  });
 }
 
 // Set List: reorder ids so same-tuning songs are adjacent, then persist.
@@ -3211,6 +3240,7 @@ function renderSetList() {
     : `${totalCount} song${totalCount !== 1 ? 's' : ''}`;
   document.getElementById('setlist-count').textContent = countText;
   updateTimeBar(songs);
+  requestAnimationFrame(applyNameMarquee);
 }
 
 function syncSetListFromDom() {
@@ -4630,6 +4660,7 @@ document.getElementById('voting-modal-close').addEventListener('click', () => {
     const activateMobileTab = function(panelId) {
       mobileTabs.forEach(t => t.classList.toggle('active', t.dataset.panel === panelId));
       document.querySelectorAll('.panel').forEach(p => p.classList.toggle('mobile-active', p.id === panelId));
+      requestAnimationFrame(applyNameMarquee);
     };
     activateMobileTab('library-panel');
     mobileTabs.forEach(tab => tab.addEventListener('click', () => activateMobileTab(tab.dataset.panel)));
