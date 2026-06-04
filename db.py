@@ -150,16 +150,22 @@ def upsert_song(user_id: str, song: dict, band_id: str = None) -> dict:
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
             # ── UPDATE path: incoming id is an existing UUID for this owner ──
             if _is_uuid(incoming):
-                owner_pred = "band_id = %(owner)s" if band_id else "user_id = %(owner)s"
+                if band_id:
+                    # Band members may update band-owned songs or their own personal songs
+                    update_pred = "band_id = %(band_id)s OR user_id = %(user_id)s"
+                    update_params = {**f, "id": incoming, "band_id": band_id, "user_id": user_id}
+                else:
+                    update_pred = "user_id = %(user_id)s"
+                    update_params = {**f, "id": incoming, "user_id": user_id}
                 cur.execute(f"""
                     UPDATE songs SET
                       name=%(name)s, duration_raw=%(duration_raw)s, duration_sec=%(duration_sec)s,
                       artist=%(artist)s, status=%(status)s, tuning=%(tuning)s,
                       recorded_tuning=%(recorded_tuning)s, our_tuning=%(our_tuning)s,
                       album_art=%(album_art)s, spotify_url=%(spotify_url)s, youtube_link=%(youtube_link)s
-                    WHERE id=%(id)s AND {owner_pred}
+                    WHERE id=%(id)s AND ({update_pred})
                     RETURNING *
-                """, {**f, "id": incoming, "owner": (band_id if band_id else user_id)})
+                """, update_params)
                 row = cur.fetchone()
                 if row:
                     conn.commit()
