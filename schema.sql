@@ -28,6 +28,13 @@ CREATE TABLE IF NOT EXISTS bands (
     -- threshold = ceil(band_size * approval_factor). Default 3.25.
     -- At 3.25: 4 Mehs (12) and 2 Love+2 Hard-no (12) both fall below the 13-pt threshold.
     approval_factor NUMERIC     NOT NULL DEFAULT 3.25,
+    -- Default timing settings seeded into new setlists for this band.
+    default_target_seconds        INTEGER NOT NULL DEFAULT 9000,
+    default_warn_seconds          INTEGER NOT NULL DEFAULT 7200,
+    default_song_buffer_seconds   INTEGER NOT NULL DEFAULT 45,
+    default_tuning_change_seconds INTEGER NOT NULL DEFAULT 60,
+    default_break_count           INTEGER NOT NULL DEFAULT 0,
+    default_break_seconds         INTEGER NOT NULL DEFAULT 0,
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
@@ -97,6 +104,13 @@ CREATE TABLE IF NOT EXISTS setlists (
     name       TEXT        NOT NULL DEFAULT 'Main Set',
     band_id    UUID        REFERENCES bands(id)             ON DELETE CASCADE,
     user_id    UUID        REFERENCES neon_auth."user"(id)  ON DELETE CASCADE,
+    -- Per-setlist timing settings (copy-on-create from band defaults; source of truth).
+    target_seconds        INTEGER NOT NULL DEFAULT 9000,
+    warn_seconds          INTEGER NOT NULL DEFAULT 7200,
+    song_buffer_seconds   INTEGER NOT NULL DEFAULT 45,
+    tuning_change_seconds INTEGER NOT NULL DEFAULT 60,
+    break_count           INTEGER NOT NULL DEFAULT 0,
+    break_seconds         INTEGER NOT NULL DEFAULT 0,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     CONSTRAINT setlist_has_one_owner CHECK (
