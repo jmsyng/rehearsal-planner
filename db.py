@@ -9,7 +9,9 @@ DEFAULT_TUNINGS = ['E standard', 'Eb', 'Drop D', 'Drop C#']
 
 # 5-point Likert scale — stored as strings "1"–"5"
 VOTE_POINTS = {"5": 5, "4": 4, "3": 3, "2": 2, "1": 1}
-# Approval threshold = math.ceil(band_size * approval_factor), computed in cast_vote
+# Approval threshold = math.ceil(band_size * approval_factor), computed in cast_vote.
+# approval_factor is per-band (bands.approval_factor, default 3.0/5) — never assume
+# a fixed band size; everything scales off the live band_members count.
 
 
 def get_conn():
@@ -315,14 +317,17 @@ def _default_setlist_id(cur, *, user_id=None, band_id=None, create=False):
         )
     row = cur.fetchone()
     if row:
-        return row[0]
+        # Works whether `cur` is a tuple cursor or a RealDictCursor (e.g. when
+        # called from cast_vote → _auto_add_to_setlist).
+        return row["id"] if isinstance(row, dict) else row[0]
     if not create:
         return None
     cur.execute(
         "INSERT INTO setlists (name, band_id, user_id) VALUES ('Main Set', %s, %s) RETURNING id",
         (band_id, None if band_id else user_id)
     )
-    return cur.fetchone()[0]
+    new_row = cur.fetchone()
+    return new_row["id"] if isinstance(new_row, dict) else new_row[0]
 
 
 def get_setlist(user_id: str) -> list:
@@ -527,10 +532,9 @@ def join_band(user_id: str, invite_token: str) -> dict:
             if cur.fetchone():
                 return {"id": str(band_id), "name": band["name"], "already_member": True}
 
-            cur.execute("SELECT COUNT(*) as cnt FROM band_members WHERE band_id = %s", (band_id,))
-            count = cur.fetchone()["cnt"]
-            if count >= 4:
-                raise ValueError("Band is full (max 4 members)")
+            cur.execute("SELECT COUNT(*) AS cnt FROM band_members WHERE band_id = %s", (band_id,))
+            if cur.fetchone()["cnt"] >= 24:
+                raise ValueError("Band is full (max 24 members)")
 
             cur.execute(
                 "INSERT INTO band_members (band_id, user_id, role) VALUES (%s, %s, 'member')",
@@ -771,10 +775,11 @@ def _auto_add_to_setlist(cur, band_id: str, song_id: str) -> None:
     """Append an approved song to the band's default setlist."""
     sid = _default_setlist_id(cur, band_id=band_id, create=True)
     cur.execute(
-        "SELECT COALESCE(MAX(position), 0) + 1 FROM setlist_songs WHERE setlist_id = %s",
+        "SELECT COALESCE(MAX(position), 0) + 1 AS next_pos FROM setlist_songs WHERE setlist_id = %s",
         (sid,)
     )
-    next_pos = cur.fetchone()[0]
+    pos_row = cur.fetchone()
+    next_pos = pos_row["next_pos"] if isinstance(pos_row, dict) else pos_row[0]
     cur.execute("""
         INSERT INTO setlist_songs (setlist_id, song_id, position, plays)
         VALUES (%s, %s, %s, 1)

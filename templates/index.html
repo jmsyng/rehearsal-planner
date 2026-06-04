@@ -1700,7 +1700,7 @@
       <h3>Voting threshold</h3>
       <div style="display:flex; align-items:center; gap:12px;">
         <input id="approval-factor-slider" type="range" min="1" max="5" step="0.5" style="flex:1;" oninput="onApprovalFactorInput()" onchange="saveApprovalFactor()" />
-        <span id="approval-factor-value" style="font-size:13px; font-weight:600; width:30px; text-align:right;">3.5</span>
+        <span id="approval-factor-value" style="font-size:13px; font-weight:600; width:30px; text-align:right;">3.25</span>
       </div>
       <p id="approval-factor-help" style="font-size:11px; color:var(--text-dim); margin-top:6px;"></p>
     </div>
@@ -2697,10 +2697,12 @@ function makeSongCard(song, inSetList) {
 
       // Score line
       const bandSize = _bandData?.members?.length || 1;
+      const factor = Number(_bandData?.approval_factor ?? 3.25);
       const scoreEl = document.createElement('p');
       scoreEl.style.cssText = 'font-size:11px; color:var(--text-dim); margin:0;';
-      const threshold = Math.ceil(bandSize * 3.5);
-      scoreEl.textContent = `Score: ${song.extra.proposalScore ?? 0}/${bandSize * 5} · need ${threshold} to approve`;
+      const threshold = Math.ceil(bandSize * factor);
+      const currentScore = song.extra.proposalScore ?? 0;
+      scoreEl.textContent = `Score: ${currentScore} (${Math.max(0, threshold - currentScore)} pts to approve)`;
       propBlock.appendChild(scoreEl);
 
       expandedSection.appendChild(propBlock);
@@ -3783,7 +3785,7 @@ function openBandSettingsModal() {
   const inviteUrl = `${location.origin}${location.pathname}?join=${_bandData.invite_token}`;
   document.getElementById('invite-link-display').value = inviteUrl;
 
-  const factor = Number(_bandData.approval_factor ?? 3.5);
+  const factor = Number(_bandData.approval_factor ?? 3.25);
   document.getElementById('approval-factor-slider').value = factor;
   document.getElementById('approval-factor-value').textContent = factor;
   updateApprovalHelp(factor);
@@ -3796,7 +3798,8 @@ function openBandSettingsModal() {
 function renderBandMembers() {
   const members = _bandData.members || [];
   const isAdmin = _bandData.role === 'admin';
-  document.getElementById('band-members-header').textContent = `Members (${members.length}/4)`;
+  document.getElementById('band-members-header').textContent =
+    `Members (${members.length}/24)`;
   const membersEl = document.getElementById('band-info-members');
   membersEl.innerHTML = '';
 
@@ -4182,7 +4185,12 @@ function renderVotingCard() {
   emptyEl.style.display = 'none';
 
   const remaining = _votingProposals.length;
-  progressEl.textContent = `${remaining} song${remaining !== 1 ? 's' : ''} waiting for your vote`;
+  // Keep the index in range (e.g. after a splice removes the last item).
+  if (_votingIndex >= remaining) _votingIndex = remaining - 1;
+  if (_votingIndex < 0) _votingIndex = 0;
+  progressEl.textContent = remaining === 1
+    ? '1 song waiting for your vote'
+    : `Song ${_votingIndex + 1} of ${remaining} waiting for your vote`;
 
   const p = _votingProposals[_votingIndex];
   const song = p.song;
@@ -4238,32 +4246,67 @@ function renderVotingCard() {
   }
 
   // Score
-  const bandSize = _bandData?.members?.length || (p.votes?.length + 1) || 4;
-  const threshold = Math.ceil(bandSize * 3.5);
+  const bandSize = _bandData?.members?.length || (p.votes?.length + 1) || 1;
+  const factor = Number(_bandData?.approval_factor ?? 3.25);
+  const threshold = Math.ceil(bandSize * factor);
   const scoreEl = document.createElement('p');
   scoreEl.style.cssText = 'font-size:11px; color:var(--text-dim); margin-top:4px; margin-bottom:0;';
-  scoreEl.textContent = `Score: ${p.score}/${bandSize * 5} · need ${threshold} to approve`;
+  scoreEl.textContent = `Score: ${p.score} (${Math.max(0, threshold - p.score)} pts to approve)`;
   cardEl.appendChild(scoreEl);
 
-  // Vote buttons (Likert 1–5)
+  // Vote buttons (Likert 1–5). Show the point value (with emoji) rather than a
+  // long descriptive label — five word-labels in a row are far too tight on mobile.
   btnsEl.innerHTML = '';
   btnsEl.style.flexDirection = 'column';
+  btnsEl.style.gap = '12px';
   const btnRow = document.createElement('div');
-  btnRow.style.cssText = 'display:flex; gap:8px; justify-content:center;';
+  btnRow.style.cssText = 'display:flex; gap:6px; justify-content:center;';
 
   const modalBtnBg = { '5':'var(--green)', '4':'#2e9e7a', '3':'#6b6b80', '2':'#c07820', '1':'var(--red)' };
   LIKERT_VOTES.forEach(lv => {
     const btn = document.createElement('button');
-    btn.textContent = `${lv.emoji} ${lv.label}`;
-    btn.title = lv.tip;
-    btn.style.cssText = `flex:1; background:${modalBtnBg[lv.v]}; color:#fff; border:none; border-radius:8px; padding:12px 4px; font-size:13px; font-weight:700; cursor:pointer; transition:opacity .15s;`;
+    btn.innerHTML = `<span style="font-size:18px; line-height:1;">${lv.emoji}</span>` +
+                    `<span style="font-size:15px; line-height:1;">${lv.v}</span>`;
+    btn.title = `${lv.label} — ${lv.tip}`;
+    btn.setAttribute('aria-label', `${lv.label} (${lv.v} of 5)`);
+    btn.style.cssText = `flex:1; min-width:0; display:flex; flex-direction:column; align-items:center; gap:5px; background:${modalBtnBg[lv.v]}; color:#fff; border:none; border-radius:8px; padding:12px 4px; font-weight:700; cursor:pointer; transition:opacity .15s;`;
     btn.addEventListener('click', () => {
       submitVote(p.id, lv.v);
     });
     btnRow.appendChild(btn);
   });
-
   btnsEl.append(btnRow);
+
+  // Legend so the point values stay self-explanatory.
+  const legend = document.createElement('div');
+  legend.style.cssText = 'display:flex; justify-content:space-between; font-size:10px; color:var(--text-dim); padding:0 4px;';
+  legend.innerHTML = '<span>5 · Love it</span><span>1 · Hard no</span>';
+  btnsEl.append(legend);
+
+  // Queue navigation — lets the user browse other songs awaiting their vote
+  // (and skip a song without voting on it).
+  if (remaining > 1) {
+    const navRow = document.createElement('div');
+    navRow.style.cssText = 'display:flex; gap:8px; justify-content:space-between; margin-top:4px;';
+    const navBtnCss = 'flex:1; background:none; border:1px solid var(--border); color:var(--text-dim); border-radius:8px; padding:9px 4px; font-size:12px; font-weight:600; cursor:pointer;';
+
+    const prevBtn = document.createElement('button');
+    prevBtn.textContent = '‹ Previous';
+    prevBtn.style.cssText = navBtnCss;
+    prevBtn.disabled = _votingIndex === 0;
+    if (prevBtn.disabled) prevBtn.style.opacity = '0.4';
+    prevBtn.addEventListener('click', () => { _votingIndex--; renderVotingCard(); });
+
+    const nextBtn = document.createElement('button');
+    nextBtn.textContent = 'Next ›';
+    nextBtn.style.cssText = navBtnCss;
+    nextBtn.disabled = _votingIndex >= remaining - 1;
+    if (nextBtn.disabled) nextBtn.style.opacity = '0.4';
+    nextBtn.addEventListener('click', () => { _votingIndex++; renderVotingCard(); });
+
+    navRow.append(prevBtn, nextBtn);
+    btnsEl.append(navRow);
+  }
 }
 
 async function submitVote(proposalId, vote) {

@@ -606,6 +606,57 @@ Completed the code changes to align with the new database schema (designed and m
 - File Layout — added `migrate.py` and `migrations/`
 - Common Tasks — corrected "Apply schema changes" and "Wipe all app data" rows
 
+### Session: Vote modal fixes — submit bug, queue nav, mobile buttons, scoring (2026-06-04)
+
+Fixed the "Vote on Songs" modal and reworked the 5-point scoring to be band-size-driven.
+
+**The "Failed to submit vote" bug (`db.py`) — the important one.** Casting a vote that
+**crossed the approval threshold** (e.g. voting "Love it" to push a song over) 500'd, so the
+frontend showed "Failed to submit vote." Root cause: `cast_vote` runs on a `RealDictCursor`,
+so when its approval path called `_auto_add_to_setlist` → `_default_setlist_id`, those helpers
+did positional `row[0]` / `cur.fetchone()[0]` and raised `KeyError: 0` (dict rows have no key
+`0`). Votes that *didn't* cross the threshold never hit the auto-add path, so it looked
+intermittent. Fix: both helpers now read the column by name when the row is a dict, falling
+back to index for tuple cursors (`row["id"] if isinstance(row, dict) else row[0]`, and an
+aliased `next_pos` column in `_auto_add_to_setlist`). **Lesson: any helper that may be called
+with either a tuple cursor or a `RealDictCursor` must not index rows positionally.** Verified
+end-to-end against the live DB (River Below proposal → approved, score 10, song→Learning,
+auto-added to setlist) then reverted.
+
+**Scoring rework (decisions from the user):**
+- **Default approval factor lowered 3.5 → 3.0** (~60%, simple positive-leaning majority on the
+  5-point scale). `schema.sql` default changed; `migrations/002_approval_factor_default_3.sql`
+  sets the column default to 3.0 and migrates bands still on the old default (`= 3.5`) to 3.0.
+  Applied locally via `migrate.py` (the one existing band is now 3.0). **Run `migrate.py`
+  against prod before/with deploy.**
+- **4-member cap removed entirely** (`db.py join_band` — deleted the `count >= 4` /
+  "Band is full" check). Scoring already scales off the live `band_members` count, so any size
+  works. UI "Members (n/4)" → "Members (n)".
+- **Frontend was hardcoding `3.5`** in the score lines (inline card + voting modal) and had a
+  `|| 4` band-size fallback. Both now read `_bandData.approval_factor` (fallback 3.0) and use
+  the real `members.length` (fallback 1). The Band Settings slider help text already used the
+  live factor.
+
+**Voting modal UX (`templates/index.html`, `renderVotingCard`):**
+- **Queue navigation added.** The modal only ever showed `_votingProposals[0]` and spliced on
+  vote — no way to browse the others. Added "‹ Previous" / "Skip ›" buttons (shown when >1
+  proposal; ends disabled appropriately) that move `_votingIndex` and re-render. Progress line
+  now reads "Song X of N waiting for your vote". Added an index clamp at the top of
+  `renderVotingCard` so a splice past the end can't leave `_votingIndex` out of range.
+- **Mobile vote buttons** were "❤️ Love it" … ×5 in one row — far too tight. Now each button
+  shows the emoji + its **point value** (5/4/3/2/1) stacked, with the descriptive label moved
+  to `title`/`aria-label`, plus a "1 · Hard no … 5 · Love it" legend under the row. (The inline
+  song-card vote buttons were already emoji-only.)
+
+**Verification:** vote bug verified against live DB (above). Modal verified in Claude Preview
+(localhost:5051) at 375px with injected mock `_bandData`/`_votingProposals` (no real band on the
+test account): point-value buttons + legend, Prev/Skip nav across 3 songs with correct
+disabled-end states, score "5/10 · need 6 to approve" (2 members × 3.0), and a 5-member sim
+showing "5/25 · need 15" — confirming size-independence. No console errors.
+
+**State at session end:** All changes local only (not committed, not deployed). Migration 002
+applied to the local/connected Neon DB only.
+
 ## Maintenance Pattern for This File
 
 When future sessions do meaningful work in this project, ask Claude:

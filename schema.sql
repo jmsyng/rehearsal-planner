@@ -24,9 +24,10 @@ CREATE TABLE IF NOT EXISTS bands (
     id              UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
     name            TEXT        NOT NULL,
     invite_token    TEXT        UNIQUE NOT NULL DEFAULT gen_random_uuid()::text,
-    -- Per-member average rating required to approve a song.
-    -- threshold = ceil(band_size * approval_factor). Default 3.5.
-    approval_factor NUMERIC     NOT NULL DEFAULT 3.5,
+    -- Per-member average rating (1–5 Likert) required to approve a song.
+    -- threshold = ceil(band_size * approval_factor). Default 3.25.
+    -- At 3.25: 4 Mehs (12) and 2 Love+2 Hard-no (12) both fall below the 13-pt threshold.
+    approval_factor NUMERIC     NOT NULL DEFAULT 3.25,
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
