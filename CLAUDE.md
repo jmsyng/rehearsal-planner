@@ -657,6 +657,16 @@ showing "5/25 · need 15" — confirming size-independence. No console errors.
 **State at session end:** All changes local only (not committed, not deployed). Migration 002
 applied to the local/connected Neon DB only.
 
+### Session: Tuning Chip Visibility + Song Name Marquee (2026-06-04)
+
+**Completed (all in `templates/index.html`). Branch: `claude/tuning-chip-song-truncate-BpRHk`.**
+
+- **Tuning chip always visible.** Added `flex-shrink: 0` to `.tuning-badge`. Without it, a sufficiently long song name could crowd the chip out of the flex row.
+
+- **Animated back-and-forth marquee for long song names.** The song name `<span>` is now wrapped in a `.song-name-wrap` div (`overflow: hidden; flex: 1; min-width: 0`). After each `renderLibrary()` / `renderSetList()` call (via `requestAnimationFrame`) and on mobile-tab switch, `applyNameMarquee()` checks every wrap: if `span.scrollWidth > wrap.clientWidth`, it sets `--scroll-offset` (exact pixel overflow, negative) and `--scroll-dur` (scales with overflow length, min 3 s) on the span, then adds class `is-scrolling`. The `song-name-marquee` CSS keyframe glides the text left to the end, pauses, glides back, and repeats. Songs whose names fit their container are completely unaffected — no animation applied.
+
+- **State at session end:** committed and pushed to `claude/tuning-chip-song-truncate-BpRHk`; not yet merged to `main`.
+
 ## Maintenance Pattern for This File
 
 When future sessions do meaningful work in this project, ask Claude:
