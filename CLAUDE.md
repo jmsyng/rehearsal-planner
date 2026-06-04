@@ -657,6 +657,26 @@ showing "5/25 · need 15" — confirming size-independence. No console errors.
 **State at session end:** All changes local only (not committed, not deployed). Migration 002
 applied to the local/connected Neon DB only.
 
+### Session: Tuning-from-Set-List persistence fix (2026-06-04)
+
+Single bug report: tuning changes saved from the Set List panel did not persist, while the same change made from the Library panel did.
+
+**Two causes, both fixed:**
+
+**1. Backend — `api_update_song` didn't pass `band_id` (`app.py` + `db.py`).** `PUT /api/songs/<id>` called `db.upsert_song(g.user_id, song)` without a `band_id`. For band songs (`band_id` set, `user_id = NULL`), the UPDATE's `WHERE id=X AND user_id=owner` matched nothing and silently fell through to the CREATE path — producing a ghost personal song with a new UUID instead of updating the original. The original band song was never touched; after a page reload the old tuning reappeared.
+
+Fix in `app.py`: look up the user's band and pass `band_id=band["id"] if band else None` to `upsert_song`.
+
+Fix in `db.py` (`upsert_song` UPDATE path): when `band_id` is provided, use `WHERE id=%(id)s AND (band_id=%(band_id)s OR user_id=%(user_id)s)` instead of the single-owner predicate. The `OR user_id` clause ensures personal songs (e.g. not yet migrated to band) are still updatable by band members.
+
+**Why Library appeared to work:** Library songs that still had `user_id` (e.g. songs that conflicted during `migrate_songs_to_band` and were left personal) matched the old predicate and were updated correctly. Set List songs were already fully migrated to `band_id` and could not be updated.
+
+**2. Frontend — stale `song` reference after `pollNotifications` (`templates/index.html`).** `pollNotifications` runs every 60 s and replaces the entire `libraryData` array with fresh server data. If the poll fired between when a Set List card was rendered and when the user clicked Save, the `song` reference captured in the card's closure was no longer the object in `libraryData`. The post-save `renderSetList()` re-rendered from the new `libraryData` entries (old tuning), making the save look like it failed even if the API call sent the correct value.
+
+Fix: at the top of the Save button handler, find the live `libraryData` entry by `song.id` and patch its editable fields (`OurTuning`, `RecordedTuning`, `songStatus`) from the closure's `song` before re-rendering.
+
+**Committed and merged** via branch `claude/song-tuning-setlist-persist-fy9Y0` → PR → merged to `main` → Vercel auto-deployed. No schema changes; no migration needed.
+
 ## Maintenance Pattern for This File
 
 When future sessions do meaningful work in this project, ask Claude:
