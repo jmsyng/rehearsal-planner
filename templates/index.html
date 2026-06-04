@@ -557,10 +557,10 @@
       text-transform: uppercase;
       letter-spacing: 0.4px;
     }
-    .status-badge.learning  { background: rgba(80,200,120,0.18); color: #50c878; }
+    .status-badge.learning  { background: rgba(124,106,247,0.18); color: var(--accent); }
     .status-badge.proposed  { background: rgba(245,161,66,0.18);  color: var(--setlist-accent); }
     .status-badge.resting   { background: rgba(180,80,80,0.15);   color: #c87878; }
-    .status-badge.active    { background: rgba(124,106,247,0.18); color: var(--accent); }
+    .status-badge.active    { background: rgba(80,200,120,0.18);  color: #50c878; }
     .status-badge.shelved   { background: rgba(95,184,217,0.15);  color: var(--library-accent); }
     .status-badge.archived  { background: rgba(240,82,82,0.15);   color: var(--red); }
     .status-badge.status-unset { background: transparent; color: var(--text-dim); border: 1px dashed var(--border); text-transform: none; }
@@ -2146,6 +2146,7 @@ const STATUS_BY_VALUE = Object.fromEntries([...STATUSES, ARCHIVED].map(s => [s.v
 const STATUS_ORDER = [...STATUSES.map(s => s.value), 'Archived'];  // filter consumes this as string[]
 const UNSET_STATUS = 'For Consideration';   // backend default == "no status yet"
 function statusInfoFor(v) {
+  if (v === 'In Rotation') return STATUS_BY_VALUE['Active'];  // legacy alias
   return STATUS_BY_VALUE[v] || { value: v, label: v, cls: v.toLowerCase().replace(/\s+/g, '-') };
 }
 function isUnset(v) { return !v || v === UNSET_STATUS; }
@@ -4074,6 +4075,15 @@ function openStatusPopover(anchorEl, song) {
   _statusPopover = pop;
 }
 function setSongStatus(song, value) {
+  // If the song is in the set list and the new status isn't performance-ready,
+  // ask whether to remove it from the set list.
+  if (setListIds.includes(song.id) && value !== 'Active' && value !== 'Learning') {
+    const remove = confirm(`"${song.name}" is in your set list.\nRemove it from the set list?`);
+    if (remove) {
+      setListIds = setListIds.filter(id => id !== song.id);
+      saveSetlistDebounced();
+    }
+  }
   song.extra = song.extra || {};
   song.extra.Status = value;
   const live = libraryData.find(s => s.id === song.id);
