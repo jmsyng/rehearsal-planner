@@ -677,6 +677,25 @@ Added a "Sort By" control to the set list toolbar. **All in `templates/index.htm
 
 **No DB migration needed** — pure frontend change.
 
+### Session: Playthroughs label + persistence fix (2026-06-04)
+
+Labeled the Set List play-count stepper and fixed counts silently reverting. **All in `templates/index.html`.** Branch: `claude/playthroughs-feature-improvements-6uvSj`, PR #14.
+
+- **"Runthru" label** added to the left of the `−`/count/`+` stepper (`.plays-control` in `makeSongCard`, ~line 2705). It's a dim 12px `.plays-label` span (started as a `↻` icon + tooltip; user preferred plain text). Keeps an `aria-label="Playthroughs"`.
+
+- **The real bug — counts "came back on their own" (band users only).** `plays` is per-setlist (`setlist_songs.plays`), surfaced onto `song.plays` via `_PLAYS_SUBQUERY` and saved by the debounced `POST /api/setlist`. The data layer was correct; the culprit was `pollNotifications()` (band-gated, runs every 60s) doing a wholesale `libraryData = await res.json()`. A play-count edit lives only on the optimistic in-memory song object, so if the poll landed during the 500ms save debounce — or with its `/api/songs` fetch already in flight — it discarded the edited object and the still-pending `apiSaveSetlist()` then read the *replaced, stale* object and wrote the old count back. (Solo users never poll → never saw it.) Same class of bug an earlier session hit with the vote-reason field.
+
+- **Fix (all frontend):**
+  - `flushSetlistSave()` — fires a pending debounced setlist save immediately and awaits it. `pollNotifications()` now `await`s it *before* refetching, so the DB holds the latest plays.
+  - `mergeFetchedSongs(fetched)` — when replacing `libraryData`, carries over current in-memory `plays` for ids in `setListIds`, covering the fetch-already-in-flight window. `pollNotifications` uses it instead of a raw assign.
+  - `_setlistSaveTimer` now self-nulls when the timer fires (`saveSetlistDebounced`), so `flushSetlistSave`'s "is a save pending?" guard is accurate (no redundant POSTs every poll).
+  - `pagehide` + `visibilitychange:hidden` listeners flush a pending save so an edit doesn't die with the tab inside the 500ms window.
+  - Removed the spurious `apiUpdateSong(song)` from `changePlays` — `plays` isn't a `songs` column, so that PUT did nothing for the count.
+
+- **No backend/schema/migration changes.** The write path (`save_setlist`/`save_band_setlist`), POST contract, and `_PLAYS_SUBQUERY` read were already correct.
+
+- **Verification:** couldn't run the live app (no DB creds / Flask in the web container). Instead: `node --check` on both inline `<script>` blocks (clean), plus a Node harness running the *actual* new function bodies against a mock DB — simulating the poll-in-flight-when-user-clicks race: new code keeps/persists the bumped value (PASS), old behavior reverts it (FAIL), confirming the test catches the bug. A real preview-deploy check as a **band** user is still advisable before merge (the revert only repros for bands).
+
 ## Maintenance Pattern for This File
 
 When future sessions do meaningful work in this project, ask Claude:
