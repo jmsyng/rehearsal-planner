@@ -2002,10 +2002,6 @@
           <label style="display:block; font-size:12px; font-weight:600; color:var(--text-dim); margin-bottom:6px;">Our Tuning</label>
           <select id="custom-song-tuning" style="width:100%; background:var(--surface); border:1px solid var(--border); color:var(--text); padding:8px 12px; font-size:13px; border-radius:4px; outline:none;">
             <option value="">— Select —</option>
-            <option value="E standard">E standard</option>
-            <option value="Eb">Eb</option>
-            <option value="Drop D">Drop D</option>
-            <option value="Drop C#">Drop C#</option>
           </select>
         </div>
       </div>
@@ -2390,6 +2386,8 @@ async function loadAppData() {
     libraryData     = await songsRes.json();
     setListIds      = await setlistRes.json();
     allTuningValues = await tuningsRes.json();
+    const csEl = document.getElementById('custom-song-tuning');
+    if (csEl) populateTuningSelect(csEl, '');
 
     if (libraryData.length === 0) {
       const seedRes = await apiFetch('/api/initial-songs');
@@ -2454,6 +2452,25 @@ async function apiAddTuning(tuning) {
     method: 'POST',
     body: JSON.stringify({ tuning }),
   }).catch(() => showToast('Failed to save tuning'));
+}
+
+function populateTuningSelect(sel, currentValue) {
+  sel.innerHTML = '';
+  const empty = document.createElement('option');
+  empty.value = '';
+  empty.textContent = '— Select —';
+  sel.appendChild(empty);
+  allTuningValues.forEach(t => {
+    const opt = document.createElement('option');
+    opt.value = t;
+    opt.textContent = t;
+    sel.appendChild(opt);
+  });
+  const addOpt = document.createElement('option');
+  addOpt.value = '__add_new__';
+  addOpt.textContent = '＋ Add tuning…';
+  sel.appendChild(addOpt);
+  if (currentValue) sel.value = currentValue;
 }
 
 // On page load: restore session.
@@ -2792,55 +2809,38 @@ function makeSongCard(song, inSetList) {
         label.innerHTML = labelText + ' ⚠️';
       }
 
-      const selectWrapper = document.createElement('div');
-      selectWrapper.style.cssText = 'display: flex; gap: 6px; flex: 1; align-items: center;';
-
       const select = document.createElement('select');
-      select.style.cssText = 'padding: 3px 6px; border-radius: 4px; border: 1px solid var(--border); background: var(--surface); color: var(--text); font-size: 12px; width: auto; max-width: 180px;';
+      select.style.cssText = 'padding: 3px 6px; border-radius: 4px; border: 1px solid var(--border); background: var(--surface); color: var(--text); font-size: 12px; flex: 1;';
 
-      const emptyOption = document.createElement('option');
-      emptyOption.value = '';
-      emptyOption.textContent = '— Select —';
-      select.appendChild(emptyOption);
+      populateTuningSelect(select, value);
 
-      allTuningValues.forEach(tuning => {
-        const option = document.createElement('option');
-        option.value = tuning;
-        option.textContent = tuning;
-        select.appendChild(option);
-      });
-
-      if (value) {
-        select.value = value;
-      }
-
-      const addBtn = document.createElement('button');
-      addBtn.textContent = 'Add tuning';
-      addBtn.style.cssText = 'padding: 3px 8px; border-radius: 4px; border: 1px solid var(--accent); background: transparent; color: var(--accent); cursor: pointer; font-size: 11px; font-weight: 600; white-space: nowrap; flex-shrink: 0;';
-
-      addBtn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        const newTuning = prompt('Enter new tuning value:');
-        if (newTuning && newTuning.trim()) {
-          const trimmed = newTuning.trim();
-          if (!allTuningValues.includes(trimmed)) {
-            allTuningValues.push(trimmed);
-            allTuningValues.sort();
-            apiAddTuning(trimmed);
-
-            // Recreate all tuning dropdowns to show new value
-            renderLibrary();
-            return;
-          }
-        }
-      });
+      let prevValue = value || '';
 
       select.addEventListener('change', (e) => {
+        if (e.target.value === '__add_new__') {
+          e.stopPropagation();
+          const newTuning = prompt('Enter new tuning value:');
+          if (newTuning && newTuning.trim()) {
+            const trimmed = newTuning.trim();
+            if (!allTuningValues.includes(trimmed)) {
+              allTuningValues.push(trimmed);
+              allTuningValues.sort();
+              apiAddTuning(trimmed);
+            }
+            onChangeCallback(trimmed);
+            const csEl = document.getElementById('custom-song-tuning');
+            if (csEl) populateTuningSelect(csEl, csEl.value === '__add_new__' ? '' : csEl.value);
+            renderLibrary();
+          } else {
+            select.value = prevValue;
+          }
+          return;
+        }
+        prevValue = e.target.value;
         onChangeCallback(e.target.value);
       });
 
-      selectWrapper.append(select, addBtn);
-      field.append(label, selectWrapper);
+      field.append(label, select);
       return field;
     }
 
@@ -3831,6 +3831,26 @@ const customSongTuning = document.getElementById('custom-song-tuning');
 const addToLibraryBtn = document.getElementById('add-to-library-btn');
 const addToSetlistBtn = document.getElementById('add-to-setlist-btn');
 
+let customTuningPrev = '';
+if (customSongTuning) {
+  customSongTuning.addEventListener('change', e => {
+    if (e.target.value !== '__add_new__') { customTuningPrev = e.target.value; return; }
+    const newTuning = prompt('Enter new tuning value:');
+    if (newTuning && newTuning.trim()) {
+      const trimmed = newTuning.trim();
+      if (!allTuningValues.includes(trimmed)) {
+        allTuningValues.push(trimmed);
+        allTuningValues.sort();
+        apiAddTuning(trimmed);
+      }
+      populateTuningSelect(customSongTuning, trimmed);
+      customTuningPrev = trimmed;
+    } else {
+      customSongTuning.value = customTuningPrev;
+    }
+  });
+}
+
 
 addToLibraryBtn.addEventListener('click', () => addCustomSong('library'));
 addToSetlistBtn.addEventListener('click', () => addCustomSong('setlist'));
@@ -4305,6 +4325,8 @@ async function addTuningFromSettings() {
     allTuningValues.push(tuning);
     input.value = '';
     renderSettingsTunings();
+    const csEl2 = document.getElementById('custom-song-tuning');
+    if (csEl2) populateTuningSelect(csEl2, csEl2.value);
     renderLibrary();
     showToast('✓ Tuning added');
   } catch (err) {
