@@ -890,9 +890,8 @@
       flex-shrink: 0;
     }
     .plays-label {
-      font-size: 14px;
+      font-size: 12px;
       color: var(--text-dim);
-      cursor: help;
       flex-shrink: 0;
       line-height: 1;
     }
@@ -2705,8 +2704,7 @@ function makeSongCard(song, inSetList) {
   if (inSetList) {
     const playsLabel = document.createElement('span');
     playsLabel.className = 'plays-label';
-    playsLabel.textContent = '↻';
-    playsLabel.title = 'Playthroughs';
+    playsLabel.textContent = 'Runthru';
     playsLabel.setAttribute('aria-label', 'Playthroughs');
 
     const decBtn = document.createElement('button');
