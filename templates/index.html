@@ -1560,6 +1560,76 @@
       border-left-color: var(--setlist-accent);
     }
 
+    /* ── Tuning group containers (grouped set-list mode) ─────────────────────── */
+    .tuning-group { position: relative; margin-bottom: 6px; }
+
+    .tuning-group-header {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 12px;
+      background: var(--surface);
+      border: 1px solid var(--setlist-accent-dim);
+      border-radius: var(--radius);
+      cursor: default;
+      user-select: none;
+      transition: border-color .15s, box-shadow .15s;
+    }
+    .tuning-group-header:hover { border-color: var(--setlist-accent); }
+
+    .group-drag-handle {
+      cursor: grab;
+      color: var(--text-dim);
+      font-size: 18px;
+      line-height: 1;
+      padding: 0 4px;
+      flex-shrink: 0;
+    }
+    .group-drag-handle:active { cursor: grabbing; }
+
+    .tuning-group-label {
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--setlist-accent);
+      flex: 1;
+    }
+    .tuning-group-count {
+      font-size: 11px;
+      padding: 2px 7px;
+      border-radius: 10px;
+      background: var(--setlist-accent-dim);
+      color: var(--setlist-accent);
+      font-weight: 600;
+    }
+
+    .tuning-group-chevron {
+      font-size: 12px;
+      color: var(--text-dim);
+      transition: transform .2s;
+      cursor: pointer;
+      padding: 2px 4px;
+      border-radius: 4px;
+    }
+    .tuning-group-chevron:hover { color: var(--text); }
+    .tuning-group.collapsed .tuning-group-chevron { transform: rotate(-90deg); }
+
+    .tuning-group-songs { padding-left: 8px; padding-top: 4px; }
+    .tuning-group.collapsed .tuning-group-songs { display: none; }
+
+    /* Stacked-cards illusion when a group is collapsed */
+    .tuning-group.collapsed .tuning-group-header {
+      box-shadow:
+        0 4px 0 -1px var(--border),
+        0 7px 0 -2px var(--border);
+      margin-bottom: 14px;
+    }
+
+    /* SortableJS states for group-level drag */
+    .tuning-group.sortable-ghost { opacity: 0.4; }
+    .tuning-group.sortable-drag { box-shadow: 0 8px 24px rgba(0,0,0,.4); }
+    .tuning-group.sortable-drag,
+    .tuning-group.sortable-fallback { transition: none; }
+
     /* Mobile tab themed indicator stripe */
     @media (max-width: 800px) {
       .mobile-tab[data-panel="library-panel"].active {
@@ -2044,6 +2114,9 @@ let libraryTuningFilter = '';   // '' = all tunings
 let libraryStatusFilter = '';   // '' = all statuses
 let libraryShowArchived = false;// when false, Archived songs are hidden
 const STATUS_ORDER = ['Active', 'Learning', 'Proposed', 'Resting', 'Shelved', 'Archived'];
+
+let setListGroupedByTuning = false;  // sticky grouped mode
+let collapsedTunings = new Set();    // tuning keys currently collapsed
 
 // Effective status used by the badge + the Library status filter
 function effectiveStatus(song) {
@@ -3053,6 +3126,13 @@ function renderSetList() {
   const list = document.getElementById('setlist-list');
   list.innerHTML = '';
 
+  // Keep dropdown in sync with grouped state
+  const groupSel = document.getElementById('set-group-by');
+  if (groupSel) {
+    groupSel.value = setListGroupedByTuning ? 'tuning' : '';
+    groupSel.classList.toggle('active', setListGroupedByTuning);
+  }
+
   let songs = setListIds.map(songById).filter(Boolean);
   const totalCount = songs.length;  // Count before search filter
 
@@ -3074,6 +3154,8 @@ function renderSetList() {
 
   if (!songs.length) {
     list.appendChild(emptyEl);
+  } else if (setListGroupedByTuning) {
+    renderSetListGrouped(list, songs);
   } else {
     songs.forEach(song => {
       const card = makeSongCard(song, true);
@@ -3084,12 +3166,44 @@ function renderSetList() {
       });
       list.append(card);
     });
-  }
 
-  // Scroll expanded card into view so the user can see its contents
-  if (expandedSongId) {
-    const expandedCard = list.querySelector(`.song-card[data-id="${expandedSongId}"]`);
-    if (expandedCard) expandedCard.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    // Scroll expanded card into view so the user can see its contents
+    if (expandedSongId) {
+      const expandedCard = list.querySelector(`.song-card[data-id="${expandedSongId}"]`);
+      if (expandedCard) expandedCard.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    }
+
+    Sortable.create(list, {
+      group: { name: 'songs', pull: true, put: true },
+      animation: 150,
+      handle: '.drag-handle',
+      ghostClass: 'sortable-ghost',
+      dragClass: 'sortable-drag',
+      onAdd(evt) {
+        const id = evt.item.dataset.id;
+        if (!setListIds.includes(id)) {
+          const newIndex = evt.newIndex;
+          setListIds.splice(newIndex, 0, id);
+        }
+        saveSetlistDebounced();
+        renderSetList();
+        renderLibrary();
+      },
+      onUpdate(evt) {
+        const id = evt.item.dataset.id;
+        setListIds = setListIds.filter(i => i !== id);
+        setListIds.splice(evt.newIndex, 0, id);
+        saveSetlistDebounced();
+        renderSetList();
+      },
+      onRemove(evt) {
+        const id = evt.item.dataset.id;
+        setListIds = setListIds.filter(i => i !== id);
+        saveSetlistDebounced();
+        renderSetList();
+        renderLibrary();
+      },
+    });
   }
 
   const countText = setListSearchText
@@ -3097,35 +3211,128 @@ function renderSetList() {
     : `${totalCount} song${totalCount !== 1 ? 's' : ''}`;
   document.getElementById('setlist-count').textContent = countText;
   updateTimeBar(songs);
+}
 
+function syncSetListFromDom() {
+  const newIds = [];
+  document.querySelectorAll('#setlist-list .tuning-group').forEach(grp => {
+    grp.querySelectorAll('.tuning-group-songs .song-card').forEach(card => {
+      newIds.push(card.dataset.id);
+    });
+  });
+  setListIds = newIds;
+  saveSetlistDebounced();
+}
+
+function renderSetListGrouped(list, songs) {
+  // Build ordered tuning groups (preserving first-appearance order)
+  const order = [];
+  const groupMap = new Map();
+  songs.forEach(song => {
+    const key = song.extra?.OurTuning || song.extra?.Tuning || '(no tuning)';
+    if (!groupMap.has(key)) { groupMap.set(key, []); order.push(key); }
+    groupMap.get(key).push(song);
+  });
+
+  order.forEach(tuning => {
+    const groupSongs = groupMap.get(tuning);
+    const isCollapsed = collapsedTunings.has(tuning);
+
+    const groupEl = document.createElement('div');
+    groupEl.className = 'tuning-group' + (isCollapsed ? ' collapsed' : '');
+    groupEl.dataset.tuning = tuning;
+
+    // Group header
+    const header = document.createElement('div');
+    header.className = 'tuning-group-header';
+
+    const dragHandle = document.createElement('span');
+    dragHandle.className = 'group-drag-handle';
+    dragHandle.textContent = '⠿';
+
+    const label = document.createElement('span');
+    label.className = 'tuning-group-label';
+    label.textContent = tuning;
+
+    const countBadge = document.createElement('span');
+    countBadge.className = 'tuning-group-count';
+    countBadge.textContent = groupSongs.length;
+
+    const chevron = document.createElement('span');
+    chevron.className = 'tuning-group-chevron';
+    chevron.textContent = '❯';
+    chevron.title = isCollapsed ? 'Expand group' : 'Collapse group';
+    chevron.addEventListener('click', e => {
+      e.stopPropagation();
+      if (collapsedTunings.has(tuning)) collapsedTunings.delete(tuning);
+      else collapsedTunings.add(tuning);
+      renderSetList();
+    });
+
+    header.append(dragHandle, label, countBadge, chevron);
+
+    // Songs area
+    const songsEl = document.createElement('div');
+    songsEl.className = 'tuning-group-songs';
+
+    groupSongs.forEach(song => {
+      const card = makeSongCard(song, true);
+      card.addEventListener('contextmenu', e => {
+        e.preventDefault();
+        expandedSongId = expandedSongId === song.id ? null : song.id;
+        renderSetList();
+      });
+      songsEl.appendChild(card);
+    });
+
+    groupEl.append(header, songsEl);
+    list.appendChild(groupEl);
+
+    // Per-group SortableJS: song reordering + cross-group drops
+    Sortable.create(songsEl, {
+      group: { name: 'songs', pull: true, put: true },
+      animation: 150,
+      handle: '.drag-handle',
+      ghostClass: 'sortable-ghost',
+      dragClass: 'sortable-drag',
+      onAdd(evt) {
+        const id = evt.item.dataset.id;
+        if (!setListIds.includes(id)) setListIds.push(id);
+        syncSetListFromDom();
+        renderSetList();
+        renderLibrary();
+      },
+      onUpdate() {
+        syncSetListFromDom();
+      },
+      onRemove(evt) {
+        // If dragged out to library (not another group), remove from setlist
+        if (!evt.to.closest('.tuning-group-songs')) {
+          const id = evt.item.dataset.id;
+          setListIds = setListIds.filter(i => i !== id);
+          saveSetlistDebounced();
+          renderSetList();
+          renderLibrary();
+        }
+        // Cross-group moves: destination group's onAdd handles state sync
+      },
+    });
+  });
+
+  // Scroll expanded card into view
+  if (expandedSongId) {
+    const expandedCard = list.querySelector(`.song-card[data-id="${expandedSongId}"]`);
+    if (expandedCard) expandedCard.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  }
+
+  // Outer SortableJS: group-level reordering by group-drag-handle
   Sortable.create(list, {
-    group: { name: 'songs', pull: true, put: true },
+    handle: '.group-drag-handle',
     animation: 150,
-    handle: '.drag-handle',
     ghostClass: 'sortable-ghost',
     dragClass: 'sortable-drag',
-    onAdd(evt) {
-      const id = evt.item.dataset.id;
-      if (!setListIds.includes(id)) {
-        const newIndex = evt.newIndex;
-        setListIds.splice(newIndex, 0, id);
-      }
-      saveSetlistDebounced();
-      renderSetList();
-      renderLibrary();
-    },
-    onUpdate(evt) {
-      const id = evt.item.dataset.id;
-      setListIds = setListIds.filter(i => i !== id);
-      setListIds.splice(evt.newIndex, 0, id);
-      saveSetlistDebounced();
-      renderSetList();
-    },
-    onRemove(evt) {
-      const id = evt.item.dataset.id;
-      setListIds = setListIds.filter(i => i !== id);
-      saveSetlistDebounced();
-      renderSetList();
+    onUpdate() {
+      syncSetListFromDom();
       renderLibrary();
     },
   });
@@ -4403,8 +4610,16 @@ document.getElementById('voting-modal-close').addEventListener('click', () => {
   const setGroupSel = document.getElementById('set-group-by');
   if (setGroupSel) {
     setGroupSel.addEventListener('change', e => {
-      if (e.target.value === 'tuning') groupSetListByTuning();
-      e.target.value = '';  // one-shot action, not a sticky mode
+      if (e.target.value === 'tuning') {
+        collapsedTunings.clear();
+        setListGroupedByTuning = true;
+        groupSetListByTuning(); // reorders setListIds + renders (renderSetList syncs dropdown)
+      } else {
+        setListGroupedByTuning = false;
+        collapsedTunings.clear();
+        renderSetList();
+        renderLibrary();
+      }
     });
   }
 })();
