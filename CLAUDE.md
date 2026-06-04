@@ -657,6 +657,27 @@ showing "5/25 · need 15" — confirming size-independence. No console errors.
 **State at session end:** All changes local only (not committed, not deployed). Migration 002
 applied to the local/connected Neon DB only.
 
+### Session: Tuning Dropdown Interaction Redesign (2026-06-04)
+
+Moved the "Add Tuning" action from a separate button next to each tuning `<select>` into the dropdown itself as the last option.
+
+**What changed (`templates/index.html`):**
+
+- **`populateTuningSelect(sel, currentValue)` helper** (new top-level function, defined after `apiAddTuning`). Clears and repopulates any `<select>` with `allTuningValues` options + a `＋ Add tuning…` sentinel option (`value="__add_new__"`) at the bottom. Called from `createTuningDropdown`, the custom-song form init, and anywhere `allTuningValues` changes.
+
+- **`createTuningDropdown` rewrite** (inside `makeSongCard`): Removed the `selectWrapper` div and the `addBtn` element that sat beside the `<select>`. The `select` now fills available space (`flex: 1`). The `change` handler detects `value === '__add_new__'`, prompts for a name, adds it to `allTuningValues` (sorted), calls `apiAddTuning`, fires `onChangeCallback(trimmed)`, refreshes the custom-song tuning select, and calls `renderLibrary()`. Cancelling the prompt reverts the select to its previous value (`prevValue` tracked in closure).
+
+- **`#custom-song-tuning` (Add Custom Song form)**: Hardcoded `<option>` elements removed — now dynamically populated via `populateTuningSelect` after `allTuningValues` loads in `loadAppData`. A `change` listener handles `__add_new__` the same way (prompt → add → `populateTuningSelect` → auto-select new value; cancel reverts via `customTuningPrev`).
+
+- **`addTuningFromSettings`**: Added `populateTuningSelect(csEl2, csEl2.value)` call after pushing to `allTuningValues`, so the custom-song dropdown also stays in sync when tunings are added via My Settings.
+
+**Data-model clarification (no code change):**
+
+- Tunings live **per user** in `user_tunings` — each band member has their own list of custom tunings beyond the 4 hardcoded defaults. There is no band-scoped tuning table.
+- Song fields (`our_tuning`, `recorded_tuning`) live on the shared `songs` row — band-scoped when `band_id` is set. Any band member can update "Our Tuning" on a song and all other members see the saved value. What they won't see is the custom *option* in their dropdown if they haven't added that tuning to their own `user_tunings`.
+
+**State at session end:** Committed and pushed to branch `claude/tuning-dropdown-interaction-iHKsJ`. Not yet merged to `main`.
+
 ## Maintenance Pattern for This File
 
 When future sessions do meaningful work in this project, ask Claude:
