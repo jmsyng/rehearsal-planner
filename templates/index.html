@@ -889,6 +889,13 @@
       gap: 6px;
       flex-shrink: 0;
     }
+    .plays-label {
+      font-size: 14px;
+      color: var(--text-dim);
+      cursor: help;
+      flex-shrink: 0;
+      line-height: 1;
+    }
     .plays-control button {
       background: var(--bg);
       border: 1px solid var(--border);
@@ -2480,10 +2487,20 @@ async function apiDeleteSong(songId) {
   }).catch(() => showToast('Failed to delete song'));
 }
 
-let _setlistSaveTimer;
+let _setlistSaveTimer = null;
 function saveSetlistDebounced() {
   clearTimeout(_setlistSaveTimer);
-  _setlistSaveTimer = setTimeout(apiSaveSetlist, 500);
+  _setlistSaveTimer = setTimeout(() => { _setlistSaveTimer = null; apiSaveSetlist(); }, 500);
+}
+
+// If a debounced setlist save is pending, fire it now and wait for it. Lets callers
+// (e.g. pollNotifications, page-hide) guarantee local plays/order edits hit the DB
+// before anything refetches or the tab goes away.
+async function flushSetlistSave() {
+  if (!_setlistSaveTimer) return;
+  clearTimeout(_setlistSaveTimer);
+  _setlistSaveTimer = null;
+  await apiSaveSetlist();
 }
 
 async function apiSaveSetlist() {
@@ -2491,11 +2508,32 @@ async function apiSaveSetlist() {
     const song = songById(id);
     return { song_id: id, position: i, plays: song?.plays ?? 1 };
   });
-  apiFetch('/api/setlist', {
+  return apiFetch('/api/setlist', {
     method: 'POST',
     body: JSON.stringify(entries),
   }).catch(() => showToast('Failed to save set list'));
 }
+
+// Replace libraryData from a fresh /api/songs payload WITHOUT clobbering optimistic
+// play-count edits for songs currently in the set list. Guards the window where the
+// 60s poll's fetch was already in flight when the user bumped a count.
+function mergeFetchedSongs(fetched) {
+  const inSet = new Set(setListIds);
+  const localPlays = new Map();
+  for (const s of libraryData) {
+    if (inSet.has(s.id)) localPlays.set(s.id, s.plays);
+  }
+  for (const s of fetched) {
+    if (localPlays.has(s.id)) s.plays = localPlays.get(s.id);
+  }
+  return fetched;
+}
+
+// Don't let a count/order edit die with the tab inside the 500ms debounce window.
+window.addEventListener('pagehide', () => { flushSetlistSave(); });
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'hidden') flushSetlistSave();
+});
 
 async function apiAddTuning(tuning) {
   apiFetch('/api/tunings', {
@@ -2665,6 +2703,12 @@ function makeSongCard(song, inSetList) {
   plays.className = 'plays-control';
 
   if (inSetList) {
+    const playsLabel = document.createElement('span');
+    playsLabel.className = 'plays-label';
+    playsLabel.textContent = '↻';
+    playsLabel.title = 'Playthroughs';
+    playsLabel.setAttribute('aria-label', 'Playthroughs');
+
     const decBtn = document.createElement('button');
     decBtn.textContent = '−';
     decBtn.addEventListener('click', e => { e.stopPropagation(); changePlays(song.id, -1); });
@@ -2678,7 +2722,7 @@ function makeSongCard(song, inSetList) {
     incBtn.textContent = '+';
     incBtn.addEventListener('click', e => { e.stopPropagation(); changePlays(song.id, +1); });
 
-    plays.append(decBtn, playsCount, incBtn);
+    plays.append(playsLabel, decBtn, playsCount, incBtn);
   }
 
   row.append(albumArtEl, info);
@@ -3452,7 +3496,7 @@ function changePlays(id, delta) {
   document.querySelectorAll(`#plays-${id}`).forEach(el => {
     el.textContent = song.plays;
   });
-  apiUpdateSong(song);
+  // plays lives on setlist_songs, not the songs table — only the setlist save persists it.
   saveSetlistDebounced();
   // Re-calculate time bar
   const songs = setListIds.map(songById).filter(Boolean);
@@ -4543,9 +4587,12 @@ function countUnvotedProposals() {
 async function pollNotifications() {
   if (!_bandData) return;
   try {
+    // Persist any pending play-count/order edit before refetching, so the DB holds
+    // the latest values and the refresh doesn't revert what the user just changed.
+    await flushSetlistSave();
     const res = await apiFetch('/api/songs');
     if (res.ok) {
-      libraryData = await res.json();
+      libraryData = mergeFetchedSongs(await res.json());
       renderLibrary();
     }
   } catch {}
