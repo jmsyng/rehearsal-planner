@@ -718,6 +718,26 @@ def add_tuning(user_id: str, tuning: str) -> None:
         put_conn(conn)
 
 
+def delete_tuning(user_id: str, tuning: str) -> bool:
+    if tuning in DEFAULT_TUNINGS:
+        return False
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "DELETE FROM user_tunings WHERE user_id = %s AND tuning = %s",
+                (user_id, tuning)
+            )
+            deleted = cur.rowcount > 0
+        conn.commit()
+        return deleted
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        put_conn(conn)
+
+
 # ── Band ────────────────────────────────────────────────────────────────────────
 
 def get_user_band(user_id: str):

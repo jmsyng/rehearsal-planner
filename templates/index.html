@@ -390,14 +390,14 @@
       }
 
       .mobile-tab:not(.active) {
-        background: var(--surface);
+        background: var(--bg);
         color: var(--text-dim);
         padding-top: 7px;
         margin-bottom: 0;
       }
 
       .mobile-tab.active {
-        background: var(--bg);
+        background: var(--surface);
         color: var(--text);
         padding-top: 12px;
         z-index: 2;
@@ -580,10 +580,24 @@
       text-transform: uppercase;
       letter-spacing: 0.4px;
     }
-    .status-badge.learning  { background: rgba(80,200,120,0.18); color: #50c878; }
+    .status-badge.learning  { background: rgba(124,106,247,0.18); color: var(--accent); }
     .status-badge.proposed  { background: rgba(245,161,66,0.18);  color: var(--setlist-accent); }
     .status-badge.resting   { background: rgba(180,80,80,0.15);   color: #c87878; }
-    .status-badge.active    { background: rgba(124,106,247,0.18); color: var(--accent); }
+    .status-badge.active    { background: rgba(80,200,120,0.18);  color: #50c878; }
+    .status-badge.shelved   { background: rgba(95,184,217,0.15);  color: var(--library-accent); }
+    .status-badge.archived  { background: rgba(240,82,82,0.15);   color: var(--red); }
+    .status-badge.status-unset { background: transparent; color: var(--text-dim); border: 1px dashed var(--border); text-transform: none; }
+
+    /* Clickable status chip + quick-pick popover */
+    .status-chip-btn { border: 0; cursor: pointer; font: inherit; font-size: 10px; font-weight: 700;
+      text-transform: uppercase; letter-spacing: 0.4px; line-height: 1; }
+    .status-badge.status-unset.status-chip-btn { border: 1px dashed var(--border); }
+    .status-popover { background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
+      padding: 4px; box-shadow: 0 8px 24px rgba(0,0,0,.4); display: flex; flex-direction: column; gap: 2px; }
+    .status-popover-item { background: transparent; border: 0; text-align: left; padding: 4px 6px;
+      border-radius: 6px; cursor: pointer; }
+    .status-popover-item:hover, .status-popover-item.selected { background: var(--border); }
+    .status-popover-item.status-clear { color: var(--text-dim); font-size: 12px; }
 
     .meta-added-by {
       font-size: 11px;
@@ -880,7 +894,16 @@
       font-size: 14px; font-weight: 600; margin-bottom: 2px;
       display: flex; align-items: center; gap: 6px; min-width: 0;
     }
-    .song-name > span:first-child { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+    .song-name-wrap { overflow: hidden; flex: 1; min-width: 0; }
+    .song-name-wrap > span { display: inline-block; white-space: nowrap; }
+    .song-name-wrap > span.is-scrolling {
+      animation: song-name-marquee var(--scroll-dur, 5s) ease-in-out 1s infinite;
+    }
+    @keyframes song-name-marquee {
+      0%, 25%  { transform: translateX(0); }
+      45%, 55% { transform: translateX(var(--scroll-offset, 0px)); }
+      80%, 100% { transform: translateX(0); }
+    }
     .song-dur { font-size: 12px; color: var(--text-dim); display: flex; align-items: center; gap: 6px; }
 
     .plays-control {
@@ -888,6 +911,12 @@
       align-items: center;
       gap: 6px;
       flex-shrink: 0;
+    }
+    .plays-label {
+      font-size: 12px;
+      color: var(--text-dim);
+      flex-shrink: 0;
+      line-height: 1;
     }
     .plays-control button {
       background: var(--bg);
@@ -1045,6 +1074,7 @@
 
 
     .tuning-badge {
+      flex-shrink: 0;
       font-size: 10px;
       font-weight: 600;
       padding: 2px 6px;
@@ -1616,6 +1646,76 @@
       border-left-color: var(--setlist-accent);
     }
 
+    /* ── Tuning group containers (grouped set-list mode) ─────────────────────── */
+    .tuning-group { position: relative; margin-bottom: 6px; }
+
+    .tuning-group-header {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 12px;
+      background: var(--surface);
+      border: 1px solid var(--setlist-accent-dim);
+      border-radius: var(--radius);
+      cursor: default;
+      user-select: none;
+      transition: border-color .15s, box-shadow .15s;
+    }
+    .tuning-group-header:hover { border-color: var(--setlist-accent); }
+
+    .group-drag-handle {
+      cursor: grab;
+      color: var(--text-dim);
+      font-size: 18px;
+      line-height: 1;
+      padding: 0 4px;
+      flex-shrink: 0;
+    }
+    .group-drag-handle:active { cursor: grabbing; }
+
+    .tuning-group-label {
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--setlist-accent);
+      flex: 1;
+    }
+    .tuning-group-count {
+      font-size: 11px;
+      padding: 2px 7px;
+      border-radius: 10px;
+      background: var(--setlist-accent-dim);
+      color: var(--setlist-accent);
+      font-weight: 600;
+    }
+
+    .tuning-group-chevron {
+      font-size: 12px;
+      color: var(--text-dim);
+      transition: transform .2s;
+      cursor: pointer;
+      padding: 2px 4px;
+      border-radius: 4px;
+    }
+    .tuning-group-chevron:hover { color: var(--text); }
+    .tuning-group.collapsed .tuning-group-chevron { transform: rotate(-90deg); }
+
+    .tuning-group-songs { padding-left: 8px; padding-top: 4px; }
+    .tuning-group.collapsed .tuning-group-songs { display: none; }
+
+    /* Stacked-cards illusion when a group is collapsed */
+    .tuning-group.collapsed .tuning-group-header {
+      box-shadow:
+        0 4px 0 -1px var(--border),
+        0 7px 0 -2px var(--border);
+      margin-bottom: 14px;
+    }
+
+    /* SortableJS states for group-level drag */
+    .tuning-group.sortable-ghost { opacity: 0.4; }
+    .tuning-group.sortable-drag { box-shadow: 0 8px 24px rgba(0,0,0,.4); }
+    .tuning-group.sortable-drag,
+    .tuning-group.sortable-fallback { transition: none; }
+
     /* Mobile tab themed indicator stripe */
     @media (max-width: 800px) {
       .mobile-tab[data-panel="library-panel"].active {
@@ -2092,10 +2192,6 @@
           <label style="display:block; font-size:12px; font-weight:600; color:var(--text-dim); margin-bottom:6px;">Our Tuning</label>
           <select id="custom-song-tuning" style="width:100%; background:var(--surface); border:1px solid var(--border); color:var(--text); padding:8px 12px; font-size:13px; border-radius:4px; outline:none;">
             <option value="">— Select —</option>
-            <option value="E standard">E standard</option>
-            <option value="Eb">Eb</option>
-            <option value="Drop D">Drop D</option>
-            <option value="Drop C#">Drop C#</option>
           </select>
         </div>
       </div>
@@ -2150,6 +2246,12 @@
         <select class="toolbar-select" id="set-group-by" title="Group set list" aria-label="Group set list">
           <option value="">No grouping</option>
           <option value="tuning">Group by tuning</option>
+        </select>
+        <select class="toolbar-select" id="set-sort-by" title="Sort set list" aria-label="Sort set list">
+          <option value="">Manual order</option>
+          <option value="artist">Artist A–Z</option>
+          <option value="title">Title A–Z</option>
+          <option value="duration">Duration ↑</option>
         </select>
         <button class="toolbar-btn" id="timing-settings-btn" onclick="openTimingSettingsModal()" title="Timing settings" aria-label="Timing settings">⏱</button>
       </div>
@@ -2220,16 +2322,39 @@ let allTuningValues = ['E standard', 'Eb', 'Drop D', 'Drop C#'];  // available t
 let libraryTuningFilter = '';   // '' = all tunings
 let libraryStatusFilter = '';   // '' = all statuses
 let libraryShowArchived = false;// when false, Archived songs are hidden
-const STATUS_ORDER = ['Active', 'Learning', 'Proposed', 'Resting', 'Shelved', 'Archived'];
+// Canonical status list — single source of truth for the picker, badges, and filter.
+const STATUSES = [
+  { value: 'Active',   label: 'Active',   cls: 'active' },
+  { value: 'Learning', label: 'Learning', cls: 'learning' },
+  { value: 'Proposed', label: 'Proposed', cls: 'proposed' },
+  { value: 'Resting',  label: 'Resting',  cls: 'resting' },
+  { value: 'Shelved',  label: 'Shelved',  cls: 'shelved' },
+];
+const ARCHIVED = { value: 'Archived', label: 'Archived', cls: 'archived' };
+const STATUS_BY_VALUE = Object.fromEntries([...STATUSES, ARCHIVED].map(s => [s.value, s]));
+const STATUS_ORDER = [...STATUSES.map(s => s.value), 'Archived'];  // filter consumes this as string[]
+const UNSET_STATUS = 'For Consideration';   // backend default == "no status yet"
+function statusInfoFor(v) {
+  if (v === 'In Rotation') return STATUS_BY_VALUE['Active'];  // legacy alias
+  return STATUS_BY_VALUE[v] || { value: v, label: v, cls: v.toLowerCase().replace(/\s+/g, '-') };
+}
+function isUnset(v) { return !v || v === UNSET_STATUS; }
 
-// Effective status used by the badge + the Library status filter
+let setListGroupedByTuning = false;  // sticky grouped mode
+let collapsedTunings = new Set();    // tuning keys currently collapsed
+let setListSortBy = '';              // '' | 'artist' | 'title' | 'duration'
+
+// Effective status used by the badge + the Library status filter.
+// A manual (or voting-written) Status wins; 'For Consideration' falls through to the
+// band proposal label; otherwise the song is unset.
 function effectiveStatus(song) {
-  if (song.extra?.Status === 'Archived') return 'Archived';
+  const s = song.extra?.Status;
+  if (s && s !== UNSET_STATUS) return s;
   const ps = song.extra?.proposalStatus;
   if (ps === 'pending')  return 'Proposed';
-  if (ps === 'approved') return 'Learning';
   if (ps === 'rejected') return 'Resting';
-  return song.extra?.songStatus || song.extra?.Status || '';
+  if (ps === 'approved') return 'Learning';
+  return s || '';
 }
 
 let _bandData = null;       // {id, name, invite_token, role, members:[...]}
@@ -2549,6 +2674,8 @@ async function loadAppData() {
     libraryData     = await songsRes.json();
     _setlists       = setlistsRes.ok ? await setlistsRes.json() : [];
     allTuningValues = await tuningsRes.json();
+    const csEl = document.getElementById('custom-song-tuning');
+    if (csEl) populateTuningSelect(csEl, '');
 
     // Apply the setlist — but if we have a stored preference, load that instead.
     const defaultData = await setlistRes.json();
@@ -2597,10 +2724,20 @@ async function apiDeleteSong(songId) {
   }).catch(() => showToast('Failed to delete song'));
 }
 
-let _setlistSaveTimer;
+let _setlistSaveTimer = null;
 function saveSetlistDebounced() {
   clearTimeout(_setlistSaveTimer);
-  _setlistSaveTimer = setTimeout(apiSaveSetlist, 500);
+  _setlistSaveTimer = setTimeout(() => { _setlistSaveTimer = null; apiSaveSetlist(); }, 500);
+}
+
+// If a debounced setlist save is pending, fire it now and wait for it. Lets callers
+// (e.g. pollNotifications, page-hide) guarantee local plays/order edits hit the DB
+// before anything refetches or the tab goes away.
+async function flushSetlistSave() {
+  if (!_setlistSaveTimer) return;
+  clearTimeout(_setlistSaveTimer);
+  _setlistSaveTimer = null;
+  await apiSaveSetlist();
 }
 
 async function apiSaveSetlist() {
@@ -2608,17 +2745,57 @@ async function apiSaveSetlist() {
     const song = songById(id);
     return { song_id: id, position: i, plays: song?.plays ?? 1 };
   });
-  apiFetch('/api/setlist', {
+  return apiFetch('/api/setlist', {
     method: 'POST',
     body: JSON.stringify({ setlist_id: _currentSetlistId, entries }),
   }).catch(() => showToast('Failed to save set list'));
 }
+
+// Replace libraryData from a fresh /api/songs payload WITHOUT clobbering optimistic
+// play-count edits for songs currently in the set list. Guards the window where the
+// 60s poll's fetch was already in flight when the user bumped a count.
+function mergeFetchedSongs(fetched) {
+  const inSet = new Set(setListIds);
+  const localPlays = new Map();
+  for (const s of libraryData) {
+    if (inSet.has(s.id)) localPlays.set(s.id, s.plays);
+  }
+  for (const s of fetched) {
+    if (localPlays.has(s.id)) s.plays = localPlays.get(s.id);
+  }
+  return fetched;
+}
+
+// Don't let a count/order edit die with the tab inside the 500ms debounce window.
+window.addEventListener('pagehide', () => { flushSetlistSave(); });
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'hidden') flushSetlistSave();
+});
 
 async function apiAddTuning(tuning) {
   apiFetch('/api/tunings', {
     method: 'POST',
     body: JSON.stringify({ tuning }),
   }).catch(() => showToast('Failed to save tuning'));
+}
+
+function populateTuningSelect(sel, currentValue) {
+  sel.innerHTML = '';
+  const empty = document.createElement('option');
+  empty.value = '';
+  empty.textContent = '— Select —';
+  sel.appendChild(empty);
+  allTuningValues.forEach(t => {
+    const opt = document.createElement('option');
+    opt.value = t;
+    opt.textContent = t;
+    sel.appendChild(opt);
+  });
+  const addOpt = document.createElement('option');
+  addOpt.value = '__add_new__';
+  addOpt.textContent = '＋ Add tuning…';
+  sel.appendChild(addOpt);
+  if (currentValue) sel.value = currentValue;
 }
 
 // On page load: restore session.
@@ -2704,9 +2881,12 @@ function makeSongCard(song, inSetList) {
   const nameEl = document.createElement('div');
   nameEl.className = 'song-name';
   nameEl.title = song.name;
+  const nameWrap = document.createElement('div');
+  nameWrap.className = 'song-name-wrap';
   const nameText = document.createElement('span');
   nameText.textContent = song.name;
-  nameEl.appendChild(nameText);
+  nameWrap.appendChild(nameText);
+  nameEl.appendChild(nameWrap);
   const tuning = song.extra?.OurTuning || song.extra?.Tuning;
   if (tuning) {
     const tuningBadge = document.createElement('span');
@@ -2721,19 +2901,21 @@ function makeSongCard(song, inSetList) {
   const durText = document.createElement('span');
   durText.textContent = song.duration_raw || '—';
   durEl.appendChild(durText);
-  const ps = song.extra?.proposalStatus;
-  const ss = song.extra?.songStatus;
-  let statusInfo = null;
-  if (ps === 'pending')  statusInfo = { label: 'Proposed', cls: 'proposed' };
-  else if (ps === 'approved') statusInfo = { label: 'Learning', cls: 'learning' };
-  else if (ps === 'rejected') statusInfo = { label: 'Resting',  cls: 'resting'  };
-  else if (ss) statusInfo = { label: ss, cls: ss.toLowerCase() };
-  if (statusInfo) {
-    const statusBadge = document.createElement('span');
-    statusBadge.className = `status-badge ${statusInfo.cls}`;
-    statusBadge.textContent = statusInfo.label;
-    durEl.appendChild(statusBadge);
+  // Clickable status chip — opens a quick-pick popover to change the status.
+  // When unset (new songs default to 'For Consideration'), shows a faint "+ Status" affordance.
+  const statusVal = effectiveStatus(song);
+  const chip = document.createElement('button');
+  if (isUnset(statusVal)) {
+    chip.className = 'status-badge status-unset status-chip-btn';
+    chip.textContent = '+ Status';
+  } else {
+    const info = statusInfoFor(statusVal);
+    chip.className = `status-badge ${info.cls} status-chip-btn`;
+    chip.textContent = info.label;
   }
+  chip.title = 'Change status';
+  chip.addEventListener('click', e => { e.stopPropagation(); openStatusPopover(chip, song); });
+  durEl.appendChild(chip);
 
   info.append(artistEl, nameEl, durEl);
 
@@ -2758,6 +2940,11 @@ function makeSongCard(song, inSetList) {
   plays.className = 'plays-control';
 
   if (inSetList) {
+    const playsLabel = document.createElement('span');
+    playsLabel.className = 'plays-label';
+    playsLabel.textContent = 'Runthru';
+    playsLabel.setAttribute('aria-label', 'Playthroughs');
+
     const decBtn = document.createElement('button');
     decBtn.textContent = '−';
     decBtn.addEventListener('click', e => { e.stopPropagation(); changePlays(song.id, -1); });
@@ -2771,7 +2958,7 @@ function makeSongCard(song, inSetList) {
     incBtn.textContent = '+';
     incBtn.addEventListener('click', e => { e.stopPropagation(); changePlays(song.id, +1); });
 
-    plays.append(decBtn, playsCount, incBtn);
+    plays.append(playsLabel, decBtn, playsCount, incBtn);
   }
 
   row.append(albumArtEl, info);
@@ -2957,55 +3144,38 @@ function makeSongCard(song, inSetList) {
         label.innerHTML = labelText + ' ⚠️';
       }
 
-      const selectWrapper = document.createElement('div');
-      selectWrapper.style.cssText = 'display: flex; gap: 6px; flex: 1; align-items: center;';
-
       const select = document.createElement('select');
-      select.style.cssText = 'padding: 3px 6px; border-radius: 4px; border: 1px solid var(--border); background: var(--surface); color: var(--text); font-size: 12px; width: auto; max-width: 180px;';
+      select.style.cssText = 'padding: 3px 6px; border-radius: 4px; border: 1px solid var(--border); background: var(--surface); color: var(--text); font-size: 12px; flex: 1;';
 
-      const emptyOption = document.createElement('option');
-      emptyOption.value = '';
-      emptyOption.textContent = '— Select —';
-      select.appendChild(emptyOption);
+      populateTuningSelect(select, value);
 
-      allTuningValues.forEach(tuning => {
-        const option = document.createElement('option');
-        option.value = tuning;
-        option.textContent = tuning;
-        select.appendChild(option);
-      });
-
-      if (value) {
-        select.value = value;
-      }
-
-      const addBtn = document.createElement('button');
-      addBtn.textContent = 'Add tuning';
-      addBtn.style.cssText = 'padding: 3px 8px; border-radius: 4px; border: 1px solid var(--accent); background: transparent; color: var(--accent); cursor: pointer; font-size: 11px; font-weight: 600; white-space: nowrap; flex-shrink: 0;';
-
-      addBtn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        const newTuning = prompt('Enter new tuning value:');
-        if (newTuning && newTuning.trim()) {
-          const trimmed = newTuning.trim();
-          if (!allTuningValues.includes(trimmed)) {
-            allTuningValues.push(trimmed);
-            allTuningValues.sort();
-            apiAddTuning(trimmed);
-
-            // Recreate all tuning dropdowns to show new value
-            renderLibrary();
-            return;
-          }
-        }
-      });
+      let prevValue = value || '';
 
       select.addEventListener('change', (e) => {
+        if (e.target.value === '__add_new__') {
+          e.stopPropagation();
+          const newTuning = prompt('Enter new tuning value:');
+          if (newTuning && newTuning.trim()) {
+            const trimmed = newTuning.trim();
+            if (!allTuningValues.includes(trimmed)) {
+              allTuningValues.push(trimmed);
+              allTuningValues.sort();
+              apiAddTuning(trimmed);
+            }
+            onChangeCallback(trimmed);
+            const csEl = document.getElementById('custom-song-tuning');
+            if (csEl) populateTuningSelect(csEl, csEl.value === '__add_new__' ? '' : csEl.value);
+            renderLibrary();
+          } else {
+            select.value = prevValue;
+          }
+          return;
+        }
+        prevValue = e.target.value;
         onChangeCallback(e.target.value);
       });
 
-      selectWrapper.append(select, addBtn);
-      field.append(label, selectWrapper);
+      field.append(label, select);
       return field;
     }
 
@@ -3037,24 +3207,25 @@ function makeSongCard(song, inSetList) {
       }
     }, song.extra?.RecordedTuning);
 
-    // Solo user status field (band users have status driven by voting)
-    if (!_bandData) {
+    // Status field — secondary editor (the collapsed-card chip is the primary path).
+    // Persists immediately on change, same as the popover.
+    {
       const statusField = document.createElement('div');
       statusField.className = 'expanded-field expanded-field-inline';
       const statusLabel = document.createElement('label');
       statusLabel.textContent = 'Status';
       const statusSelect = document.createElement('select');
       statusSelect.style.cssText = 'padding: 3px 6px; border-radius: 4px; border: 1px solid var(--border); background: var(--surface); color: var(--text); font-size: 12px;';
-      ['—', 'Active', 'Learning', 'Proposed', 'Resting', 'Shelved'].forEach(opt => {
+      const currentStatus = effectiveStatus(song);
+      [{ value: '', label: '—' }, ...STATUSES].forEach(opt => {
         const o = document.createElement('option');
-        o.value = opt === '—' ? '' : opt;
-        o.textContent = opt;
-        if ((song.extra?.songStatus || '') === o.value) o.selected = true;
+        o.value = opt.value;
+        o.textContent = opt.label;
+        if (currentStatus === opt.value) o.selected = true;
         statusSelect.appendChild(o);
       });
       statusSelect.addEventListener('change', e => {
-        song.extra = song.extra || {};
-        song.extra.songStatus = e.target.value || undefined;
+        setSongStatus(song, e.target.value || UNSET_STATUS);
       });
       statusField.append(statusLabel, statusSelect);
       expandedSection.appendChild(statusField);
@@ -3075,7 +3246,7 @@ function makeSongCard(song, inSetList) {
       if (live && live !== song) {
         live.extra.OurTuning = song.extra.OurTuning;
         live.extra.RecordedTuning = song.extra.RecordedTuning;
-        if (song.extra.songStatus !== undefined) live.extra.songStatus = song.extra.songStatus;
+        if (song.extra.Status !== undefined) live.extra.Status = song.extra.Status;
       }
       apiUpdateSong(song);
       showToast('Changes saved');
@@ -3132,6 +3303,7 @@ function makeSongCard(song, inSetList) {
 
 
 function renderLibrary() {
+  closeStatusPopover();   // avoid orphaning a popover anchored to a card we're about to replace
   const list = document.getElementById('library-list');
   list.innerHTML = '';
 
@@ -3228,6 +3400,7 @@ function renderLibrary() {
     handle: '.drag-handle',
     onEnd(evt) { /* library is read-only order */ },
   });
+  requestAnimationFrame(applyNameMarquee);
 }
 
 // Keep the Library toolbar dropdowns in sync with the songs actually present
@@ -3267,6 +3440,35 @@ function rebuildSelect(sel, values, current, allLabel) {
   sel.classList.toggle('active', !!current);
 }
 
+function applyNameMarquee() {
+  document.querySelectorAll('.song-name-wrap').forEach(wrap => {
+    const span = wrap.querySelector('span');
+    if (!span || !wrap.clientWidth) return;
+    const overflow = span.scrollWidth - wrap.clientWidth;
+    if (overflow > 4) {
+      span.style.setProperty('--scroll-offset', `-${overflow}px`);
+      span.style.setProperty('--scroll-dur', `${Math.max(3, overflow / 20).toFixed(1)}s`);
+      span.classList.add('is-scrolling');
+    } else {
+      span.classList.remove('is-scrolling');
+    }
+  });
+}
+
+// Apply an ephemeral sort lens to an array of song objects without touching setListIds.
+function applySongSort(arr) {
+  if (!setListSortBy) return arr;
+  const copy = arr.slice();
+  if (setListSortBy === 'artist') {
+    copy.sort((a, b) => (a.extra?.Artist || '').localeCompare(b.extra?.Artist || ''));
+  } else if (setListSortBy === 'title') {
+    copy.sort((a, b) => a.name.localeCompare(b.name));
+  } else if (setListSortBy === 'duration') {
+    copy.sort((a, b) => (a.duration_seconds || 0) - (b.duration_seconds || 0));
+  }
+  return copy;
+}
+
 // Set List: reorder ids so same-tuning songs are adjacent, then persist.
 // Stable — preserves first-appearance order of both groups and members.
 function groupSetListByTuning() {
@@ -3288,8 +3490,21 @@ function groupSetListByTuning() {
 }
 
 function renderSetList() {
+  closeStatusPopover();   // avoid orphaning a popover anchored to a card we're about to replace
   const list = document.getElementById('setlist-list');
   list.innerHTML = '';
+
+  // Keep dropdowns in sync with view state
+  const groupSel = document.getElementById('set-group-by');
+  if (groupSel) {
+    groupSel.value = setListGroupedByTuning ? 'tuning' : '';
+    groupSel.classList.toggle('active', setListGroupedByTuning);
+  }
+  const sortSel = document.getElementById('set-sort-by');
+  if (sortSel) {
+    sortSel.value = setListSortBy;
+    sortSel.classList.toggle('active', !!setListSortBy);
+  }
 
   let songs = setListIds.map(songById).filter(Boolean);
   const totalCount = songs.length;  // Count before search filter
@@ -3302,6 +3517,9 @@ function renderSetList() {
     );
   }
 
+  // Apply ephemeral sort lens (does not modify setListIds)
+  songs = applySongSort(songs);
+
   const emptyEl = document.getElementById('setlist-empty') || (() => {
     const d = document.createElement('div');
     d.className = 'empty-state';
@@ -3312,6 +3530,8 @@ function renderSetList() {
 
   if (!songs.length) {
     list.appendChild(emptyEl);
+  } else if (setListGroupedByTuning) {
+    renderSetListGrouped(list, songs);
   } else {
     songs.forEach(song => {
       const card = makeSongCard(song, true);
@@ -3322,12 +3542,52 @@ function renderSetList() {
       });
       list.append(card);
     });
-  }
 
-  // Scroll expanded card into view so the user can see its contents
-  if (expandedSongId) {
-    const expandedCard = list.querySelector(`.song-card[data-id="${expandedSongId}"]`);
-    if (expandedCard) expandedCard.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    // Scroll expanded card into view so the user can see its contents
+    if (expandedSongId) {
+      const expandedCard = list.querySelector(`.song-card[data-id="${expandedSongId}"]`);
+      if (expandedCard) expandedCard.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    }
+
+    Sortable.create(list, {
+      group: { name: 'songs', pull: true, put: true },
+      animation: 150,
+      handle: '.drag-handle',
+      ghostClass: 'sortable-ghost',
+      dragClass: 'sortable-drag',
+      onAdd(evt) {
+        const id = evt.item.dataset.id;
+        if (!setListIds.includes(id)) {
+          const newIndex = evt.newIndex;
+          setListIds.splice(newIndex, 0, id);
+        }
+        saveSetlistDebounced();
+        renderSetList();
+        renderLibrary();
+      },
+      onUpdate(evt) {
+        if (setListSortBy) {
+          // Sorted view active — bake the displayed DOM order into setListIds and clear the sort.
+          const newIds = [];
+          evt.to.querySelectorAll('.song-card').forEach(card => newIds.push(card.dataset.id));
+          setListIds = newIds;
+          setListSortBy = '';
+        } else {
+          const id = evt.item.dataset.id;
+          setListIds = setListIds.filter(i => i !== id);
+          setListIds.splice(evt.newIndex, 0, id);
+        }
+        saveSetlistDebounced();
+        renderSetList();
+      },
+      onRemove(evt) {
+        const id = evt.item.dataset.id;
+        setListIds = setListIds.filter(i => i !== id);
+        saveSetlistDebounced();
+        renderSetList();
+        renderLibrary();
+      },
+    });
   }
 
   const countText = setListSearchText
@@ -3335,35 +3595,130 @@ function renderSetList() {
     : `${totalCount} song${totalCount !== 1 ? 's' : ''}`;
   document.getElementById('setlist-count').textContent = countText;
   updateTimeBar();
+  requestAnimationFrame(applyNameMarquee);
+}
 
+function syncSetListFromDom() {
+  const newIds = [];
+  document.querySelectorAll('#setlist-list .tuning-group').forEach(grp => {
+    grp.querySelectorAll('.tuning-group-songs .song-card').forEach(card => {
+      newIds.push(card.dataset.id);
+    });
+  });
+  setListIds = newIds;
+  setListSortBy = '';  // drag bakes the order; clear the sort lens
+  saveSetlistDebounced();
+}
+
+function renderSetListGrouped(list, songs) {
+  // Build ordered tuning groups (preserving first-appearance order)
+  const order = [];
+  const groupMap = new Map();
+  songs.forEach(song => {
+    const key = song.extra?.OurTuning || song.extra?.Tuning || '(no tuning)';
+    if (!groupMap.has(key)) { groupMap.set(key, []); order.push(key); }
+    groupMap.get(key).push(song);
+  });
+
+  order.forEach(tuning => {
+    const groupSongs = groupMap.get(tuning);
+    const isCollapsed = collapsedTunings.has(tuning);
+
+    const groupEl = document.createElement('div');
+    groupEl.className = 'tuning-group' + (isCollapsed ? ' collapsed' : '');
+    groupEl.dataset.tuning = tuning;
+
+    // Group header
+    const header = document.createElement('div');
+    header.className = 'tuning-group-header';
+
+    const dragHandle = document.createElement('span');
+    dragHandle.className = 'group-drag-handle';
+    dragHandle.textContent = '⠿';
+
+    const label = document.createElement('span');
+    label.className = 'tuning-group-label';
+    label.textContent = tuning;
+
+    const countBadge = document.createElement('span');
+    countBadge.className = 'tuning-group-count';
+    countBadge.textContent = groupSongs.length;
+
+    const chevron = document.createElement('span');
+    chevron.className = 'tuning-group-chevron';
+    chevron.textContent = '❯';
+    chevron.title = isCollapsed ? 'Expand group' : 'Collapse group';
+    chevron.addEventListener('click', e => {
+      e.stopPropagation();
+      if (collapsedTunings.has(tuning)) collapsedTunings.delete(tuning);
+      else collapsedTunings.add(tuning);
+      renderSetList();
+    });
+
+    header.append(dragHandle, label, countBadge, chevron);
+
+    // Songs area
+    const songsEl = document.createElement('div');
+    songsEl.className = 'tuning-group-songs';
+
+    groupSongs.forEach(song => {
+      const card = makeSongCard(song, true);
+      card.addEventListener('contextmenu', e => {
+        e.preventDefault();
+        expandedSongId = expandedSongId === song.id ? null : song.id;
+        renderSetList();
+      });
+      songsEl.appendChild(card);
+    });
+
+    groupEl.append(header, songsEl);
+    list.appendChild(groupEl);
+
+    // Per-group SortableJS: song reordering + cross-group drops
+    Sortable.create(songsEl, {
+      group: { name: 'songs', pull: true, put: true },
+      animation: 150,
+      handle: '.drag-handle',
+      ghostClass: 'sortable-ghost',
+      dragClass: 'sortable-drag',
+      onAdd(evt) {
+        const id = evt.item.dataset.id;
+        if (!setListIds.includes(id)) setListIds.push(id);
+        syncSetListFromDom();
+        renderSetList();
+        renderLibrary();
+      },
+      onUpdate() {
+        syncSetListFromDom();
+      },
+      onRemove(evt) {
+        // If dragged out to library (not another group), remove from setlist
+        if (!evt.to.closest('.tuning-group-songs')) {
+          const id = evt.item.dataset.id;
+          setListIds = setListIds.filter(i => i !== id);
+          saveSetlistDebounced();
+          renderSetList();
+          renderLibrary();
+        }
+        // Cross-group moves: destination group's onAdd handles state sync
+      },
+    });
+  });
+
+  // Scroll expanded card into view
+  if (expandedSongId) {
+    const expandedCard = list.querySelector(`.song-card[data-id="${expandedSongId}"]`);
+    if (expandedCard) expandedCard.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  }
+
+  // Outer SortableJS: group-level reordering by group-drag-handle
   Sortable.create(list, {
-    group: { name: 'songs', pull: true, put: true },
+    handle: '.group-drag-handle',
     animation: 150,
-    handle: '.drag-handle',
     ghostClass: 'sortable-ghost',
     dragClass: 'sortable-drag',
-    onAdd(evt) {
-      const id = evt.item.dataset.id;
-      if (!setListIds.includes(id)) {
-        const newIndex = evt.newIndex;
-        setListIds.splice(newIndex, 0, id);
-      }
-      saveSetlistDebounced();
-      renderSetList();
-      renderLibrary();
-    },
-    onUpdate(evt) {
-      const id = evt.item.dataset.id;
-      setListIds = setListIds.filter(i => i !== id);
-      setListIds.splice(evt.newIndex, 0, id);
-      saveSetlistDebounced();
-      renderSetList();
-    },
-    onRemove(evt) {
-      const id = evt.item.dataset.id;
-      setListIds = setListIds.filter(i => i !== id);
-      saveSetlistDebounced();
-      renderSetList();
+    onUpdate() {
+      syncSetListFromDom();
       renderLibrary();
     },
   });
@@ -3377,7 +3732,7 @@ function changePlays(id, delta) {
   document.querySelectorAll(`#plays-${id}`).forEach(el => {
     el.textContent = song.plays;
   });
-  apiUpdateSong(song);
+  // plays lives on setlist_songs, not the songs table — only the setlist save persists it.
   saveSetlistDebounced();
   // Re-calculate time bar (computes over the full set list internally)
   updateTimeBar();
@@ -3917,6 +4272,26 @@ const customSongTuning = document.getElementById('custom-song-tuning');
 const addToLibraryBtn = document.getElementById('add-to-library-btn');
 const addToSetlistBtn = document.getElementById('add-to-setlist-btn');
 
+let customTuningPrev = '';
+if (customSongTuning) {
+  customSongTuning.addEventListener('change', e => {
+    if (e.target.value !== '__add_new__') { customTuningPrev = e.target.value; return; }
+    const newTuning = prompt('Enter new tuning value:');
+    if (newTuning && newTuning.trim()) {
+      const trimmed = newTuning.trim();
+      if (!allTuningValues.includes(trimmed)) {
+        allTuningValues.push(trimmed);
+        allTuningValues.sort();
+        apiAddTuning(trimmed);
+      }
+      populateTuningSelect(customSongTuning, trimmed);
+      customTuningPrev = trimmed;
+    } else {
+      customSongTuning.value = customTuningPrev;
+    }
+  });
+}
+
 
 addToLibraryBtn.addEventListener('click', () => addCustomSong('library'));
 addToSetlistBtn.addEventListener('click', () => addCustomSong('setlist'));
@@ -4042,6 +4417,56 @@ function closeAllMenus() {
 // Backwards-compat alias (some call sites use the old name)
 function closeAppMenu() { closeAllMenus(); }
 
+// ── Song status quick-pick popover ───────────────────────────────────────────────
+let _statusPopover = null;
+function closeStatusPopover() {
+  if (_statusPopover) { _statusPopover.remove(); _statusPopover = null; }
+}
+function openStatusPopover(anchorEl, song) {
+  closeStatusPopover();
+  closeAllMenus();
+  const pop = document.createElement('div');
+  pop.className = 'status-popover';
+  const current = effectiveStatus(song);
+  STATUSES.forEach(s => {
+    const item = document.createElement('button');
+    item.className = 'status-popover-item' + (s.value === current ? ' selected' : '');
+    item.innerHTML = `<span class="status-badge ${s.cls}">${s.label}</span>`;
+    item.addEventListener('click', e => { e.stopPropagation(); setSongStatus(song, s.value); closeStatusPopover(); });
+    pop.appendChild(item);
+  });
+  if (!isUnset(current)) {
+    const clr = document.createElement('button');
+    clr.className = 'status-popover-item status-clear';
+    clr.textContent = 'Clear status';
+    clr.addEventListener('click', e => { e.stopPropagation(); setSongStatus(song, UNSET_STATUS); closeStatusPopover(); });
+    pop.appendChild(clr);
+  }
+  document.body.appendChild(pop);
+  const r = anchorEl.getBoundingClientRect();
+  pop.style.cssText += `position:absolute; top:${r.bottom + window.scrollY + 4}px; left:${r.left + window.scrollX}px; z-index:1000;`;
+  _statusPopover = pop;
+}
+function setSongStatus(song, value) {
+  // If the song is in the set list and the new status isn't performance-ready,
+  // ask whether to remove it from the set list.
+  if (setListIds.includes(song.id) && value !== 'Active' && value !== 'Learning') {
+    const remove = confirm(`"${song.name}" is in your set list.\nRemove it from the set list?`);
+    if (remove) {
+      setListIds = setListIds.filter(id => id !== song.id);
+      saveSetlistDebounced();
+    }
+  }
+  song.extra = song.extra || {};
+  song.extra.Status = value;
+  const live = libraryData.find(s => s.id === song.id);
+  if (live && live !== song) { live.extra = live.extra || {}; live.extra.Status = value; }
+  apiUpdateSong(live || song);   // fire-and-forget PUT, optimistic UI
+  renderLibrary();
+  renderSetList();
+  showToast('Status updated');
+}
+
 function updateMenuIdentity() {
   const name = _userProfile?.display_name || _userEmail || '';
   const nameEl = document.getElementById('menu-identity-name');
@@ -4069,10 +4494,11 @@ function avatarColorFor(seed) {
 
 // Close menus on outside-click or Escape
 document.addEventListener('click', (e) => {
+  if (!e.target.closest('.status-popover, .status-chip-btn')) closeStatusPopover();
   if (e.target.closest('#band-menu, #band-menu-btn, #user-menu, #user-avatar-btn')) return;
   closeAllMenus();
 });
-document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeAllMenus(); });
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') { closeAllMenus(); closeStatusPopover(); } });
 
 // ── Band Settings Modal ──────────────────────────────────────────────────────────
 
@@ -4540,15 +4966,38 @@ async function saveProfile() {
   }
 }
 
+const DEFAULT_TUNINGS = ['E standard', 'Eb', 'Drop D', 'Drop C#'];
+
 function renderSettingsTunings() {
   const wrap = document.getElementById('settings-tunings-list');
   wrap.innerHTML = '';
   (allTuningValues || []).forEach(t => {
     const pill = document.createElement('span');
-    pill.style.cssText = 'font-size:12px; padding:5px 12px; border-radius:16px; border:1px solid var(--border); background:var(--bg); color:var(--text);';
+    pill.style.cssText = 'font-size:12px; padding:5px 12px; border-radius:16px; border:1px solid var(--border); background:var(--bg); color:var(--text); display:inline-flex; align-items:center; gap:6px;';
     pill.textContent = t;
+    if (!DEFAULT_TUNINGS.includes(t)) {
+      const btn = document.createElement('button');
+      btn.textContent = '×';
+      btn.title = 'Remove tuning';
+      btn.style.cssText = 'background:none; border:none; cursor:pointer; color:var(--text-dim); font-size:14px; line-height:1; padding:0; margin:0;';
+      btn.onclick = () => deleteTuning(t);
+      pill.appendChild(btn);
+    }
     wrap.appendChild(pill);
   });
+}
+async function deleteTuning(tuning) {
+  try {
+    const res = await apiFetch('/api/tunings/' + encodeURIComponent(tuning), { method: 'DELETE' });
+    if (!res.ok) throw new Error('Failed');
+    const idx = allTuningValues.indexOf(tuning);
+    if (idx !== -1) allTuningValues.splice(idx, 1);
+    renderSettingsTunings();
+    renderLibrary();
+    showToast('✓ Tuning removed');
+  } catch (err) {
+    showToast('Failed to remove tuning');
+  }
 }
 async function addTuningFromSettings() {
   const input = document.getElementById('settings-tuning-add');
@@ -4561,6 +5010,8 @@ async function addTuningFromSettings() {
     allTuningValues.push(tuning);
     input.value = '';
     renderSettingsTunings();
+    const csEl2 = document.getElementById('custom-song-tuning');
+    if (csEl2) populateTuningSelect(csEl2, csEl2.value);
     renderLibrary();
     showToast('✓ Tuning added');
   } catch (err) {
@@ -4620,9 +5071,12 @@ function countUnvotedProposals() {
 async function pollNotifications() {
   if (!_bandData) return;
   try {
+    // Persist any pending play-count/order edit before refetching, so the DB holds
+    // the latest values and the refresh doesn't revert what the user just changed.
+    await flushSetlistSave();
     const res = await apiFetch('/api/songs');
     if (res.ok) {
-      libraryData = await res.json();
+      libraryData = mergeFetchedSongs(await res.json());
       renderLibrary();
     }
   } catch {}
@@ -4864,6 +5318,7 @@ document.getElementById('voting-modal-close').addEventListener('click', () => {
     const activateMobileTab = function(panelId) {
       mobileTabs.forEach(t => t.classList.toggle('active', t.dataset.panel === panelId));
       document.querySelectorAll('.panel').forEach(p => p.classList.toggle('mobile-active', p.id === panelId));
+      requestAnimationFrame(applyNameMarquee);
     };
     activateMobileTab('library-panel');
     mobileTabs.forEach(tab => tab.addEventListener('click', () => activateMobileTab(tab.dataset.panel)));
@@ -4889,8 +5344,24 @@ document.getElementById('voting-modal-close').addEventListener('click', () => {
   const setGroupSel = document.getElementById('set-group-by');
   if (setGroupSel) {
     setGroupSel.addEventListener('change', e => {
-      if (e.target.value === 'tuning') groupSetListByTuning();
-      e.target.value = '';  // one-shot action, not a sticky mode
+      if (e.target.value === 'tuning') {
+        collapsedTunings.clear();
+        setListGroupedByTuning = true;
+        groupSetListByTuning(); // reorders setListIds + renders (renderSetList syncs dropdown)
+      } else {
+        setListGroupedByTuning = false;
+        collapsedTunings.clear();
+        renderSetList();
+        renderLibrary();
+      }
+    });
+  }
+
+  const setSortSel = document.getElementById('set-sort-by');
+  if (setSortSel) {
+    setSortSel.addEventListener('change', e => {
+      setListSortBy = e.target.value;
+      renderSetList();
     });
   }
 })();
