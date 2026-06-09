@@ -45,6 +45,17 @@ def index():
     return render_template(
         "index.html",
         neon_auth_base_url=os.environ.get("NEON_AUTH_BASE_URL", ""),
+        share_token="",
+    )
+
+
+@app.route("/share/<token>")
+def shared_setlist_page(token):
+    """Public read-only set list view. No auth — the page fetches /api/shared/<token>."""
+    return render_template(
+        "index.html",
+        neon_auth_base_url=os.environ.get("NEON_AUTH_BASE_URL", ""),
+        share_token=token,
     )
 
 
@@ -335,6 +346,18 @@ def api_save_setlist():
         return err
     db.save_setlist_entries(sid, entries)
     return jsonify({"ok": True})
+
+
+@app.route("/api/setlist/share", methods=["GET"])
+@require_auth
+def api_get_setlist_share():
+    """Return the share token for a setlist (defaults to the caller's default setlist).
+    Optional ?setlist_id= to share a specific one."""
+    band = db.get_user_band(g.user_id)
+    sid, err = _resolve_setlist(band, g.user_id, request.args.get("setlist_id"))
+    if err:
+        return err
+    return jsonify({"token": db.get_setlist_share_token(sid)})
 
 
 # ── Tunings API ────────────────────────────────────────────────────────────────
@@ -761,6 +784,15 @@ def get_album_art(artist, track):
         pass
 
     return jsonify({"artworkUrl": ""})
+
+
+@app.route("/api/shared/<token>", methods=["GET"])
+def api_get_shared_setlist(token):
+    """Public read-only setlist payload for a share token. No auth required."""
+    data = db.get_shared_setlist(token)
+    if data is None:
+        return jsonify({"error": "Not found"}), 404
+    return jsonify(data)
 
 
 if __name__ == "__main__":

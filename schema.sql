@@ -104,6 +104,8 @@ CREATE TABLE IF NOT EXISTS setlists (
     name       TEXT        NOT NULL DEFAULT 'Main Set',
     band_id    UUID        REFERENCES bands(id)             ON DELETE CASCADE,
     user_id    UUID        REFERENCES neon_auth."user"(id)  ON DELETE CASCADE,
+    -- Permanent, unguessable token for the public read-only share link (always present).
+    share_token TEXT       UNIQUE NOT NULL DEFAULT gen_random_uuid()::text,
     -- Per-setlist timing settings (copy-on-create from band defaults; source of truth).
     target_seconds        INTEGER NOT NULL DEFAULT 9000,
     warn_seconds          INTEGER NOT NULL DEFAULT 7200,

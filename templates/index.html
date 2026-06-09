@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Rehearsal Planner</title>
   <meta name="neon-auth-base-url" content="{{ neon_auth_base_url }}">
+  <meta name="share-token" content="{{ share_token }}">
   <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.2/Sortable.min.js"></script>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -2240,7 +2241,7 @@
   <div class="panel" id="setlist-panel">
     <div class="panel-header">
       <h2>Set List</h2>
-      <div class="panel-tools">
+      <div class="panel-tools" id="setlist-tools">
         <select class="toolbar-select" id="setlist-switcher" aria-label="Switch set list" onchange="switchSetlist(this.value)" style="max-width:120px;"></select>
         <button class="toolbar-btn" id="setlist-new-btn" onclick="promptCreateSetlist()" title="New set list" aria-label="New set list">＋</button>
         <select class="toolbar-select" id="set-group-by" title="Group set list" aria-label="Group set list">
@@ -2254,6 +2255,7 @@
           <option value="duration">Duration ↑</option>
         </select>
         <button class="toolbar-btn" id="timing-settings-btn" onclick="openTimingSettingsModal()" title="Timing settings" aria-label="Timing settings">⏱</button>
+        <button type="button" class="toolbar-toggle" id="set-share-btn" title="Copy a read-only share link" onclick="shareSetlist()">🔗 Share</button>
       </div>
       <span class="spacer"></span>
       <span class="count" id="setlist-count">0 songs</span>
@@ -2368,6 +2370,11 @@ let _notifPollTimer = null; // setInterval handle for notification polling
 
 // ── Auth ──────────────────────────────────────────────────────────────────────
 const NEON_AUTH_BASE = document.querySelector('meta[name="neon-auth-base-url"]')?.content || '';
+
+// Public read-only share view: when a share token is present (served at /share/<token>),
+// the page skips auth entirely and renders the setlist with all interactive controls off.
+const SHARE_TOKEN = document.querySelector('meta[name="share-token"]')?.content || '';
+const IS_SHARED_VIEW = !!SHARE_TOKEN;
 
 // On http://localhost the Neon Auth session cookie (SameSite=None; Secure, *.neon.tech)
 // is cross-site and gets blocked by the browser, so the direct /token exchange fails.
@@ -2604,6 +2611,84 @@ function setBandChrome(hasBand) {
   document.getElementById('global-search-row').style.display = disp;
 }
 
+// ── Public read-only share view ─────────────────────────────────────────────────
+// Served at /share/<token>. No auth: fetch the public payload, strip all owner/auth
+// chrome and interactive controls, and render only the set list + time-budget bar.
+async function loadSharedView() {
+  document.getElementById('auth-overlay').style.display = 'none';
+  document.getElementById('band-setup-overlay').style.display = 'none';
+  document.getElementById('user-info').style.display = 'none';
+  setBandChrome(false);
+
+  // Set-list-only: hide the library panel and the mobile tab bar, force the set
+  // list visible (it's display:none on mobile until .mobile-active is set).
+  document.getElementById('library-panel').style.display = 'none';
+  document.getElementById('mobile-tab-bar').style.display = 'none';
+  document.getElementById('setlist-panel').classList.add('mobile-active');
+  // Hide owner-only setlist tools (group-by writes to the DB; share button is for owners).
+  const tools = document.getElementById('setlist-tools');
+  if (tools) tools.style.display = 'none';
+  document.body.classList.add('shared-view');
+
+  const overlay = document.getElementById('loading-overlay');
+  overlay.style.display = 'flex';
+  try {
+    const res = await fetch('/api/shared/' + encodeURIComponent(SHARE_TOKEN));
+    if (!res.ok) { showShareError(); return; }
+    const data = await res.json();
+
+    // renderSetList reads setListIds and looks songs up in libraryData via songById.
+    libraryData = data.songs || [];
+    setListIds  = libraryData.map(s => s.id);
+    // Drive the time-budget bar from the shared setlist's own timing settings.
+    _setlistSettings = data.settings || null;
+
+    if (data.ownerName) {
+      const logo = document.querySelector('.hdr-logo');
+      if (logo) logo.innerHTML = '<span class="hdr-logo-mark">🎸</span>' + escapeHtml(data.ownerName);
+    }
+    const h2 = document.querySelector('#setlist-panel .panel-header h2');
+    if (h2) h2.textContent = data.name || 'Set List';
+
+    renderSetList();
+  } catch (err) {
+    console.error('Failed to load shared set list:', err);
+    showShareError();
+  } finally {
+    overlay.style.display = 'none';
+  }
+}
+
+function showShareError() {
+  const list = document.getElementById('setlist-list');
+  if (list) {
+    list.innerHTML =
+      '<div class="empty-state"><span class="icon">🔗</span>' +
+      "<p>This share link isn't valid. Ask whoever sent it for an updated link.</p></div>";
+  }
+}
+
+// Owner action: fetch the setlist's permanent share token and copy a /share/<token>
+// link to the clipboard. Works for both band and solo setlists.
+async function shareSetlist() {
+  try {
+    const qs = _currentSetlistId ? ('?setlist_id=' + encodeURIComponent(_currentSetlistId)) : '';
+    const res = await apiFetch('/api/setlist/share' + qs);
+    if (!res.ok) { showToast('Could not get share link'); return; }
+    const { token } = await res.json();
+    const url = location.origin + '/share/' + token;
+    try {
+      await navigator.clipboard.writeText(url);
+      showToast('Read-only share link copied to clipboard');
+    } catch {
+      showToast(url);
+    }
+  } catch (err) {
+    console.error('Share link failed:', err);
+    showToast('Could not get share link');
+  }
+}
+
 // ── API Data Layer ────────────────────────────────────────────────────────────
 
 // Apply the new GET /api/setlist response shape: {setlist_id, settings, entries}.
@@ -2806,6 +2891,7 @@ function populateTuningSelect(sel, currentValue) {
 // 1) If we have a JWT still valid, use it immediately.
 // 2) Otherwise, try to silently refresh from the HttpOnly session cookie.
 (async function() {
+  if (IS_SHARED_VIEW) { loadSharedView(); return; }
   if (_accessToken) {
     try {
       const payload = JSON.parse(atob(_accessToken.split('.')[1]));
@@ -2908,18 +2994,24 @@ function makeSongCard(song, inSetList) {
   // Clickable status chip — opens a quick-pick popover to change the status.
   // When unset (new songs default to 'For Consideration'), shows a faint "+ Status" affordance.
   const statusVal = effectiveStatus(song);
-  const chip = document.createElement('button');
-  if (isUnset(statusVal)) {
-    chip.className = 'status-badge status-unset status-chip-btn';
-    chip.textContent = '+ Status';
-  } else {
-    const info = statusInfoFor(statusVal);
-    chip.className = `status-badge ${info.cls} status-chip-btn`;
-    chip.textContent = info.label;
+  // In the read-only share view, render the status as a static badge (no "+ Status"
+  // affordance, no click-to-edit popover).
+  if (!(IS_SHARED_VIEW && isUnset(statusVal))) {
+    const chip = document.createElement(IS_SHARED_VIEW ? 'span' : 'button');
+    if (isUnset(statusVal)) {
+      chip.className = 'status-badge status-unset status-chip-btn';
+      chip.textContent = '+ Status';
+    } else {
+      const sinfo = statusInfoFor(statusVal);
+      chip.className = `status-badge ${sinfo.cls}` + (IS_SHARED_VIEW ? '' : ' status-chip-btn');
+      chip.textContent = sinfo.label;
+    }
+    if (!IS_SHARED_VIEW) {
+      chip.title = 'Change status';
+      chip.addEventListener('click', e => { e.stopPropagation(); openStatusPopover(chip, song); });
+    }
+    durEl.appendChild(chip);
   }
-  chip.title = 'Change status';
-  chip.addEventListener('click', e => { e.stopPropagation(); openStatusPopover(chip, song); });
-  durEl.appendChild(chip);
 
   info.append(artistEl, nameEl, durEl);
 
@@ -2949,20 +3041,25 @@ function makeSongCard(song, inSetList) {
     playsLabel.textContent = 'Runthru';
     playsLabel.setAttribute('aria-label', 'Playthroughs');
 
-    const decBtn = document.createElement('button');
-    decBtn.textContent = '−';
-    decBtn.addEventListener('click', e => { e.stopPropagation(); changePlays(song.id, -1); });
-
     const playsCount = document.createElement('span');
     playsCount.className = 'plays-count';
     playsCount.textContent = song.plays;
     playsCount.id = `plays-${song.id}`;
 
-    const incBtn = document.createElement('button');
-    incBtn.textContent = '+';
-    incBtn.addEventListener('click', e => { e.stopPropagation(); changePlays(song.id, +1); });
+    if (IS_SHARED_VIEW) {
+      // Read-only: show the runthru count with its label, no +/− steppers.
+      plays.append(playsLabel, playsCount);
+    } else {
+      const decBtn = document.createElement('button');
+      decBtn.textContent = '−';
+      decBtn.addEventListener('click', e => { e.stopPropagation(); changePlays(song.id, -1); });
 
-    plays.append(playsLabel, decBtn, playsCount, incBtn);
+      const incBtn = document.createElement('button');
+      incBtn.textContent = '+';
+      incBtn.addEventListener('click', e => { e.stopPropagation(); changePlays(song.id, +1); });
+
+      plays.append(playsLabel, decBtn, playsCount, incBtn);
+    }
   }
 
   row.append(albumArtEl, info);
@@ -2970,8 +3067,8 @@ function makeSongCard(song, inSetList) {
   const actionsRow = document.createElement('div');
   actionsRow.className = 'song-card-actions';
 
-  // Drag handle on far left
-  actionsRow.appendChild(handle);
+  // Drag handle on far left (omitted in the read-only share view — no reordering)
+  if (!IS_SHARED_VIEW) actionsRow.appendChild(handle);
 
   // Setlist: playthrus control
   if (inSetList) {
@@ -2986,7 +3083,10 @@ function makeSongCard(song, inSetList) {
   spacer.style.flex = '1';
   actionsRow.appendChild(spacer);
 
-  if (inSetList) {
+  // Read-only share view: no expand/add controls at all.
+  if (IS_SHARED_VIEW) {
+    // nothing — actions row holds only the static play count
+  } else if (inSetList) {
     actionsRow.append(expandBtn);
   } else {
     const addBtn = document.createElement('button');
@@ -3014,8 +3114,9 @@ function makeSongCard(song, inSetList) {
   // Unvoted highlight
   if (hasVotableProposal && !song.extra?.userVote) card.classList.add('needs-vote');
 
-  // Click handler for card expansion (avoid drag handle and buttons)
-  card.addEventListener('click', e => {
+  // Click handler for card expansion (avoid drag handle and buttons).
+  // Disabled in the read-only share view — cards don't expand.
+  if (!IS_SHARED_VIEW) card.addEventListener('click', e => {
     // Don't toggle if clicking on interactive elements
     if (e.target.closest('.drag-handle') ||
         e.target.closest('button') ||
@@ -3539,7 +3640,7 @@ function renderSetList() {
   } else {
     songs.forEach(song => {
       const card = makeSongCard(song, true);
-      card.addEventListener('contextmenu', e => {
+      if (!IS_SHARED_VIEW) card.addEventListener('contextmenu', e => {
         e.preventDefault();
         expandedSongId = expandedSongId === song.id ? null : song.id;
         renderSetList();
@@ -3553,7 +3654,8 @@ function renderSetList() {
       if (expandedCard) expandedCard.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
     }
 
-    Sortable.create(list, {
+    // Read-only share view: render only — no drag reordering.
+    if (!IS_SHARED_VIEW) Sortable.create(list, {
       group: { name: 'songs', pull: true, put: true },
       animation: 150,
       handle: '.drag-handle',
@@ -5317,7 +5419,9 @@ document.getElementById('voting-modal-close').addEventListener('click', () => {
   }
 
   // ── Mobile tabs (no-op if no .mobile-tab elements) ────────────────────────
-  const mobileTabs = document.querySelectorAll('.mobile-tab');
+  // Skipped in the read-only share view: there's only the set list panel, and
+  // activating the library tab here would steal .mobile-active from it.
+  const mobileTabs = IS_SHARED_VIEW ? [] : document.querySelectorAll('.mobile-tab');
   if (mobileTabs.length) {
     const activateMobileTab = function(panelId) {
       mobileTabs.forEach(t => t.classList.toggle('active', t.dataset.panel === panelId));
