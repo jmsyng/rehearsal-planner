@@ -729,6 +729,39 @@ The DB schema (`setlist_songs.plays` keyed by `(setlist_id, song_id)`) was alrea
 
 **`_PLAYS_SUBQUERY` is gone — do not re-add it.** Songs always load with `plays: 1`; `applySetlistResponse` is the sole source of truth for plays in the UI.
 
+### Session: Read-only Shareable Set List View (2026-06-10)
+
+Added a public, no-auth shareable link for each setlist. Branch: `claude/readonly-shareable-view-oBREc`, PR #16 — merged and deployed. Follow-up fixes in PR #18.
+
+**What was built (PR #16):**
+
+- **`migrations/005_setlist_share_token.sql`** — `ALTER TABLE setlists ADD COLUMN IF NOT EXISTS share_token TEXT UNIQUE DEFAULT gen_random_uuid()::text`. Postgres evaluates the volatile default per existing row, so every current setlist got a distinct token. Also updated `schema.sql` to include the column.
+
+- **`db.py` — two new public functions:**
+  - `get_setlist_share_token(setlist_id)` — returns the `share_token` for a specific setlist by ID.
+  - `get_shared_setlist(token)` — public lookup with no auth. Resolves owner label (band name or `COALESCE(display_name, name, email)`), joins `setlist_songs → songs` for display-only fields, includes `settings` dict (target/warn/buffer/breaks from the setlist row), returns `{name, ownerName, settings, songs}`. Deliberately omits proposals, votes, emails — nothing private leaks.
+
+- **`app.py` — three new routes:**
+  - `GET /share/<token>` — public page, renders `index.html` with `share_token=token`.
+  - `GET /api/shared/<token>` — public data endpoint, returns `get_shared_setlist` result or 404.
+  - `GET /api/setlist/share` (`@require_auth`) — resolves the caller's active setlist via `_resolve_setlist`, returns `{"token": ...}`. Frontend builds the full URL from `location.origin`.
+  - `index()` also now passes `share_token=""` so the normal page renders with an empty token.
+
+- **`templates/index.html` — `IS_SHARED_VIEW` read-only mode:**
+  - `SHARE_TOKEN` read from a `<meta name="share-token">` tag (server-injected); `IS_SHARED_VIEW = !!SHARE_TOKEN`.
+  - Bootstrap IIFE: `if (IS_SHARED_VIEW) { loadSharedView(); return; }` — bypasses all auth/JWT logic entirely.
+  - `loadSharedView()`: hides auth overlays + all owner chrome (add button, bell, band/user menus, library panel, toolbar), sets `_setlistSettings = data.settings` so `updateTimeBar()` uses the correct thresholds, populates `libraryData`/`setListIds`, calls `renderSetList()`.
+  - `showShareError()`: friendly "This link isn't valid" message for bad/expired tokens.
+  - `makeSongCard()`: `IS_SHARED_VIEW` guards suppress drag handle, expand button, add/remove buttons, plays +/− stepper (replaced with static count), status chip (span not button), and the entire expanded block.
+  - `renderSetList()`: `Sortable.create` and `contextmenu` handler skipped when `IS_SHARED_VIEW`.
+
+**Follow-up fixes (PR #18):**
+
+- **Share link moved to ☰ band menu** — toolbar button was wrapping off-screen on smaller panels. Now at ☰ → "🔗 Copy set list link".
+- **`migrations/006_deduplicate_setlists.sql`** — removes empty duplicate setlists created during the window when migration 004 was not yet applied to prod. The `_default_setlist_id` savepoint fallback created a new empty row on each app load that tried the timing-column INSERT and failed; 006 keeps the setlist with the most songs per owner (oldest if tied) and deletes the rest, but only the empty ones (never deletes a setlist with songs). Applied to prod via `migrate.py`.
+- **Diagnosis tip:** the symptoms (ten "Main Set" entries in the switcher, create-setlist failing) were root-caused via **Vercel runtime logs** (`get_runtime_logs` MCP, project `prj_9GclRIPlSzABOMogn4Y0reP0E60t`, team `team_50uzQ1PIUjJUImH5JjwGj9Np`) — a `POST /api/setlists 500` before migration 004 landed, then `201`s after. When a prod UI bug is reported, check those logs first.
+- **Migration ordering gotcha:** `migrate.py` reads the migration files **from the checked-out branch**, not from the DB. A stale `git checkout` (branch ref pointed at an old commit) silently skipped 006 — `git pull origin <branch>` first, then re-run.
+
 ## Maintenance Pattern for This File
 
 When future sessions do meaningful work in this project, ask Claude:

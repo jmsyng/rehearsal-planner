@@ -2113,6 +2113,7 @@
           <div class="hdr-menu-label">🎸 <span id="band-name-display">Band</span></div>
           <div class="hdr-menu-sep"></div>
           <button class="app-menu-item" onclick="openBandSettingsModal(); closeAllMenus();">⚙️ Band Settings</button>
+          <button class="app-menu-item" onclick="shareSetlist(); closeAllMenus();">🔗 Copy set list link</button>
         </div>
       </div>
       <div class="hdr-logo"><span class="hdr-logo-mark">🎸</span>Rehearsal Planner</div>
@@ -2255,7 +2256,6 @@
           <option value="duration">Duration ↑</option>
         </select>
         <button class="toolbar-btn" id="timing-settings-btn" onclick="openTimingSettingsModal()" title="Timing settings" aria-label="Timing settings">⏱</button>
-        <button type="button" class="toolbar-toggle" id="set-share-btn" title="Copy a read-only share link" onclick="shareSetlist()">🔗 Share</button>
       </div>
       <span class="spacer"></span>
       <span class="count" id="setlist-count">0 songs</span>
