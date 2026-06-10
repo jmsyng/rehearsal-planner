@@ -700,6 +700,37 @@ Added a "Sort By" control to the set list toolbar. **All in `templates/index.htm
 
 **Deployment:** committed and pushed to `main` in one commit (`7e1155a`). Migrations were already applied to Neon DB before push.
 
+### Session: Read-only Shareable Set List View (2026-06-10)
+
+Added a public, no-auth shareable link for each setlist. Branch: `claude/readonly-shareable-view-oBREc`, PR #16 — merged and deployed.
+
+**What was built:**
+
+- **`migrations/005_setlist_share_token.sql`** — `ALTER TABLE setlists ADD COLUMN IF NOT EXISTS share_token TEXT UNIQUE DEFAULT gen_random_uuid()::text`. Postgres evaluates the volatile default per existing row, so every current setlist got a distinct token. Also updated `schema.sql` to include the column.
+
+- **`db.py` — two new public functions:**
+  - `get_setlist_share_token(setlist_id)` — returns the `share_token` for a specific setlist by ID.
+  - `get_shared_setlist(token)` — public lookup with no auth. Resolves owner label (band name or `COALESCE(display_name, name, email)`), joins `setlist_songs → songs` for display-only fields, includes `settings` dict (target/warn/buffer/breaks from the setlist row), returns `{name, ownerName, settings, songs}`. Deliberately omits proposals, votes, emails — nothing private leaks.
+
+- **`app.py` — three new routes:**
+  - `GET /share/<token>` — public page, renders `index.html` with `share_token=token`.
+  - `GET /api/shared/<token>` — public data endpoint, returns `get_shared_setlist` result or 404.
+  - `GET /api/setlist/share` (`@require_auth`) — resolves the caller's active setlist via `_resolve_setlist`, returns `{"token": ...}`. Frontend builds the full URL from `location.origin`.
+  - `index()` also now passes `share_token=""` so the normal page renders with an empty token.
+
+- **`templates/index.html` — `IS_SHARED_VIEW` read-only mode:**
+  - `SHARE_TOKEN` read from a `<meta name="share-token">` tag (server-injected); `IS_SHARED_VIEW = !!SHARE_TOKEN`.
+  - Bootstrap IIFE: `if (IS_SHARED_VIEW) { loadSharedView(); return; }` — bypasses all auth/JWT logic entirely.
+  - `loadSharedView()`: hides auth overlays + all owner chrome (add button, bell, band/user menus, library panel, toolbar), sets `_setlistSettings = data.settings` so `updateTimeBar()` uses the correct thresholds, populates `libraryData`/`setListIds`, calls `renderSetList()`.
+  - `showShareError()`: friendly "This link isn't valid" message for bad/expired tokens.
+  - `makeSongCard()`: `IS_SHARED_VIEW` guards suppress drag handle, expand button, add/remove buttons, plays +/− stepper (replaced with static count), status chip (span not button), and the entire expanded block.
+  - `renderSetList()`: `Sortable.create` and `contextmenu` handler skipped when `IS_SHARED_VIEW`.
+  - **Share button** added to the set list toolbar: calls `GET /api/setlist/share`, copies URL to clipboard, shows a toast — mirrors the existing copy-invite-link UX.
+
+**Integration with per-setlist timing (main's PR #14/#15 landed during this branch):** merge conflicts resolved across `schema.sql`, `db.py`, and `templates/index.html`. The `settings` key in the shared payload (`_settings_from_row`) ensures the time-budget bar on the shared page reflects the setlist's actual configured thresholds.
+
+**Migration note:** `004_setlist_time_settings.sql` and `005_setlist_share_token.sql` were both applied locally before merging (migrate.py ran from the branch checkout).
+
 ## Maintenance Pattern for This File
 
 When future sessions do meaningful work in this project, ask Claude:
