@@ -758,8 +758,9 @@ Added a public, no-auth shareable link for each setlist. Branch: `claude/readonl
 **Follow-up fixes (PR #18):**
 
 - **Share link moved to ☰ band menu** — toolbar button was wrapping off-screen on smaller panels. Now at ☰ → "🔗 Copy set list link".
-- **`migrations/006_deduplicate_setlists.sql`** — removes empty duplicate setlists created during the window when migration 004 was not yet applied to prod. The `_default_setlist_id` savepoint fallback created a new empty row on each app load that tried the timing-column INSERT and failed; 006 deletes all but the one setlist with the most songs per owner.
-- **Migration note:** run `python3 migrate.py` (from branch checkout) before merging PR #18 to clean up duplicates.
+- **`migrations/006_deduplicate_setlists.sql`** — removes empty duplicate setlists created during the window when migration 004 was not yet applied to prod. The `_default_setlist_id` savepoint fallback created a new empty row on each app load that tried the timing-column INSERT and failed; 006 keeps the setlist with the most songs per owner (oldest if tied) and deletes the rest, but only the empty ones (never deletes a setlist with songs). Applied to prod via `migrate.py`.
+- **Diagnosis tip:** the symptoms (ten "Main Set" entries in the switcher, create-setlist failing) were root-caused via **Vercel runtime logs** (`get_runtime_logs` MCP, project `prj_9GclRIPlSzABOMogn4Y0reP0E60t`, team `team_50uzQ1PIUjJUImH5JjwGj9Np`) — a `POST /api/setlists 500` before migration 004 landed, then `201`s after. When a prod UI bug is reported, check those logs first.
+- **Migration ordering gotcha:** `migrate.py` reads the migration files **from the checked-out branch**, not from the DB. A stale `git checkout` (branch ref pointed at an old commit) silently skipped 006 — `git pull origin <branch>` first, then re-run.
 
 ## Maintenance Pattern for This File
 
