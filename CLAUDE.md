@@ -700,11 +700,40 @@ Added a "Sort By" control to the set list toolbar. **All in `templates/index.htm
 
 **Deployment:** committed and pushed to `main` in one commit (`7e1155a`). Migrations were already applied to Neon DB before push.
 
+### Session: Multi-Setlist / Timing Overhaul + Plays Isolation (2026-06-04)
+
+Resolved merge conflicts on the Phase B branch, fixed a critical band-setup regression, shipped the timing/multi-setlist overhaul (PR #15), and isolated play counts per setlist (PR #17). PR #16 (read-only share links, separate session) also merged.
+
+**Merge conflict resolution (`claude/planning-mode-6FLPk`):**
+
+Main had moved 14 commits ahead. Two conflicts in `templates/index.html`:
+- Set List toolbar: kept both `#set-sort-by` select (from main) and `⏱` timing button (from branch).
+- `updateTimeBar` call site: used no-args form `updateTimeBar()` + `requestAnimationFrame(applyNameMarquee)`.
+
+**Critical regression fix — band-setup overlay on reload (`db.py`):**
+
+Phase B's `get_user_band` queried `default_*` timing columns added by migration 004. If migration hadn't been applied to the production DB, psycopg2 raised `UndefinedColumn` → 500 → `_bandData` null → band-setup overlay shown to users already in a band. Three-layer defensive fix:
+1. `get_user_band`: `try/except psycopg2.errors.UndefinedColumn` retries with a simpler query omitting the new columns.
+2. `_settings_from_row`: uses `.get()` with `SOLO_DEFAULT_SETTINGS` fallback instead of direct dict indexing.
+3. `_default_setlist_id`: savepoint pattern so the timing-column `INSERT` can fall back to a plain `INSERT` if migration absent.
+**Lesson:** always add `try/except UndefinedColumn` defensive fallbacks in any `db.py` function that reads newly-added columns, so code can deploy before the migration runs.
+
+**Plays per setlist isolation (PR #17, `db.py` + `templates/index.html`):**
+
+The DB schema (`setlist_songs.plays` keyed by `(setlist_id, song_id)`) was already correct. The bug was on the read side: `_PLAYS_SUBQUERY` fetched plays from the earliest-created setlist regardless of which setlist was active, so plays bled across setlists when switching.
+
+- **`db.py`**: removed `_PLAYS_SUBQUERY` entirely. `get_songs` and `get_band_songs` now return `1 AS plays`. Comment added explaining that the correct per-setlist value is overlaid by the frontend after `GET /api/setlist`.
+- **`templates/index.html`**: `applySetlistResponse` resets any song not in the incoming setlist to `plays = 1` before overlaying the new setlist's values. Songs entering a setlist for the first time always start at 1 play.
+
+**PRs merged:** #15 (multi-setlist + timing overhaul), #17 (plays isolation), #16 (read-only share links).
+
+**`_PLAYS_SUBQUERY` is gone — do not re-add it.** Songs always load with `plays: 1`; `applySetlistResponse` is the sole source of truth for plays in the UI.
+
 ### Session: Read-only Shareable Set List View (2026-06-10)
 
-Added a public, no-auth shareable link for each setlist. Branch: `claude/readonly-shareable-view-oBREc`, PR #16 — merged and deployed.
+Added a public, no-auth shareable link for each setlist. Branch: `claude/readonly-shareable-view-oBREc`, PR #16 — merged and deployed. Follow-up fixes in PR #18.
 
-**What was built:**
+**What was built (PR #16):**
 
 - **`migrations/005_setlist_share_token.sql`** — `ALTER TABLE setlists ADD COLUMN IF NOT EXISTS share_token TEXT UNIQUE DEFAULT gen_random_uuid()::text`. Postgres evaluates the volatile default per existing row, so every current setlist got a distinct token. Also updated `schema.sql` to include the column.
 
@@ -725,11 +754,12 @@ Added a public, no-auth shareable link for each setlist. Branch: `claude/readonl
   - `showShareError()`: friendly "This link isn't valid" message for bad/expired tokens.
   - `makeSongCard()`: `IS_SHARED_VIEW` guards suppress drag handle, expand button, add/remove buttons, plays +/− stepper (replaced with static count), status chip (span not button), and the entire expanded block.
   - `renderSetList()`: `Sortable.create` and `contextmenu` handler skipped when `IS_SHARED_VIEW`.
-  - **Share button** added to the set list toolbar: calls `GET /api/setlist/share`, copies URL to clipboard, shows a toast — mirrors the existing copy-invite-link UX.
 
-**Integration with per-setlist timing (main's PR #14/#15 landed during this branch):** merge conflicts resolved across `schema.sql`, `db.py`, and `templates/index.html`. The `settings` key in the shared payload (`_settings_from_row`) ensures the time-budget bar on the shared page reflects the setlist's actual configured thresholds.
+**Follow-up fixes (PR #18):**
 
-**Migration note:** `004_setlist_time_settings.sql` and `005_setlist_share_token.sql` were both applied locally before merging (migrate.py ran from the branch checkout).
+- **Share link moved to ☰ band menu** — toolbar button was wrapping off-screen on smaller panels. Now at ☰ → "🔗 Copy set list link".
+- **`migrations/006_deduplicate_setlists.sql`** — removes empty duplicate setlists created during the window when migration 004 was not yet applied to prod. The `_default_setlist_id` savepoint fallback created a new empty row on each app load that tried the timing-column INSERT and failed; 006 deletes all but the one setlist with the most songs per owner.
+- **Migration note:** run `python3 migrate.py` (from branch checkout) before merging PR #18 to clean up duplicates.
 
 ## Maintenance Pattern for This File
 
