@@ -116,16 +116,9 @@ def _row_to_band_song(row) -> dict:
     return song
 
 
-# Correlated subquery that pulls a song's play count from its owner's default
-# (earliest-created) setlist, so _row_to_song's `plays` matches the old behaviour.
-_PLAYS_SUBQUERY = """
-    (SELECT ss.plays
-       FROM setlist_songs ss
-       JOIN setlists sl ON sl.id = ss.setlist_id
-      WHERE ss.song_id = s.id AND sl.{owner_col} = %(owner)s
-      ORDER BY sl.created_at
-      LIMIT 1) AS plays
-"""
+# Plays are per-setlist (setlist_songs.plays). Songs loaded from GET /api/songs
+# always return plays=1; the correct per-setlist value is overlaid by
+# applySetlistResponse() on the frontend after GET /api/setlist returns.
 
 
 def get_songs(user_id: str) -> list:
@@ -134,9 +127,9 @@ def get_songs(user_id: str) -> list:
     try:
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
             cur.execute(
-                "SELECT s.*, " + _PLAYS_SUBQUERY.format(owner_col="user_id") +
-                " FROM songs s WHERE s.user_id = %(owner)s ORDER BY s.created_at",
-                {"owner": user_id}
+                "SELECT s.*, 1 AS plays"
+                " FROM songs s WHERE s.user_id = %s ORDER BY s.created_at",
+                (user_id,)
             )
             rows = cur.fetchall()
         return [_row_to_song(r) for r in rows]
@@ -279,8 +272,7 @@ def get_band_songs(band_id: str, user_id: str) -> list:
     try:
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
             cur.execute("""
-                SELECT s.*,
-                       """ + _PLAYS_SUBQUERY.format(owner_col="band_id") + """,
+                SELECT s.*, 1 AS plays,
                        COALESCE(up.display_name, nu.name, nu.email) AS proposer_name,
                        sp.id              AS proposal_id,
                        sp.proposed_by::text AS proposer_id,
@@ -343,26 +335,37 @@ def _default_setlist_id(cur, *, user_id=None, band_id=None, create=False):
         return None
     # Seed new setlist with timing settings from band defaults (if band) or
     # SOLO_DEFAULT_SETTINGS (if solo / band columns not available).
-    if band_id:
-        cur.execute("""
-            INSERT INTO setlists (name, band_id,
-                target_seconds, warn_seconds, song_buffer_seconds,
-                tuning_change_seconds, break_count, break_seconds)
-            SELECT 'Main Set', %s,
-                b.default_target_seconds, b.default_warn_seconds, b.default_song_buffer_seconds,
-                b.default_tuning_change_seconds, b.default_break_count, b.default_break_seconds
-            FROM bands b WHERE b.id = %s
-            RETURNING id
-        """, (band_id, band_id))
-    else:
-        d = SOLO_DEFAULT_SETTINGS
-        cur.execute("""
-            INSERT INTO setlists (name, user_id,
-                target_seconds, warn_seconds, song_buffer_seconds,
-                tuning_change_seconds, break_count, break_seconds)
-            VALUES ('Main Set', %s, %s, %s, %s, %s, %s, %s) RETURNING id
-        """, (user_id, d["target_seconds"], d["warn_seconds"], d["song_buffer_seconds"],
-              d["tuning_change_seconds"], d["break_count"], d["break_seconds"]))
+    # Use a savepoint so a missing-column error can fall back gracefully.
+    cur.execute("SAVEPOINT _create_setlist")
+    try:
+        if band_id:
+            cur.execute("""
+                INSERT INTO setlists (name, band_id,
+                    target_seconds, warn_seconds, song_buffer_seconds,
+                    tuning_change_seconds, break_count, break_seconds)
+                SELECT 'Main Set', %s,
+                    b.default_target_seconds, b.default_warn_seconds, b.default_song_buffer_seconds,
+                    b.default_tuning_change_seconds, b.default_break_count, b.default_break_seconds
+                FROM bands b WHERE b.id = %s
+                RETURNING id
+            """, (band_id, band_id))
+        else:
+            d = SOLO_DEFAULT_SETTINGS
+            cur.execute("""
+                INSERT INTO setlists (name, user_id,
+                    target_seconds, warn_seconds, song_buffer_seconds,
+                    tuning_change_seconds, break_count, break_seconds)
+                VALUES ('Main Set', %s, %s, %s, %s, %s, %s, %s) RETURNING id
+            """, (user_id, d["target_seconds"], d["warn_seconds"], d["song_buffer_seconds"],
+                  d["tuning_change_seconds"], d["break_count"], d["break_seconds"]))
+    except psycopg2.errors.UndefinedColumn:
+        # Migration 004 not yet applied — create setlist without timing columns.
+        cur.execute("ROLLBACK TO SAVEPOINT _create_setlist")
+        if band_id:
+            cur.execute("INSERT INTO setlists (name, band_id) VALUES ('Main Set', %s) RETURNING id", (band_id,))
+        else:
+            cur.execute("INSERT INTO setlists (name, user_id) VALUES ('Main Set', %s) RETURNING id", (user_id,))
+    cur.execute("RELEASE SAVEPOINT _create_setlist")
     new_row = cur.fetchone()
     return new_row["id"] if isinstance(new_row, dict) else new_row[0]
 
@@ -472,7 +475,8 @@ def _owns_setlist(cur, setlist_id: str, *, user_id=None, band_id=None) -> bool:
 
 
 def _settings_from_row(row) -> dict:
-    return {c: row[c] for c in _SETTINGS_COLS}
+    # Fall back to SOLO_DEFAULT_SETTINGS if migration 004 columns don't exist yet.
+    return {c: (row[c] if c in row else SOLO_DEFAULT_SETTINGS[c]) for c in _SETTINGS_COLS}
 
 
 def list_setlists(*, user_id=None, band_id=None) -> list:
@@ -816,18 +820,31 @@ def get_user_band(user_id: str):
     conn = get_conn()
     try:
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
-            cur.execute("""
-                SELECT b.id, b.name, b.invite_token, b.approval_factor,
-                       b.default_target_seconds, b.default_warn_seconds,
-                       b.default_song_buffer_seconds, b.default_tuning_change_seconds,
-                       b.default_break_count, b.default_break_seconds,
-                       bm.role
-                FROM bands b
-                JOIN band_members bm ON bm.band_id = b.id
-                WHERE bm.user_id = %s
-                LIMIT 1
-            """, (user_id,))
-            band_row = cur.fetchone()
+            try:
+                cur.execute("""
+                    SELECT b.id, b.name, b.invite_token, b.approval_factor,
+                           b.default_target_seconds, b.default_warn_seconds,
+                           b.default_song_buffer_seconds, b.default_tuning_change_seconds,
+                           b.default_break_count, b.default_break_seconds,
+                           bm.role
+                    FROM bands b
+                    JOIN band_members bm ON bm.band_id = b.id
+                    WHERE bm.user_id = %s
+                    LIMIT 1
+                """, (user_id,))
+                band_row = cur.fetchone()
+            except psycopg2.errors.UndefinedColumn:
+                # Migration 004 not yet applied — fall back to query without time_defaults.
+                conn.rollback()
+                cur.execute("""
+                    SELECT b.id, b.name, b.invite_token, b.approval_factor, bm.role
+                    FROM bands b
+                    JOIN band_members bm ON bm.band_id = b.id
+                    WHERE bm.user_id = %s
+                    LIMIT 1
+                """, (user_id,))
+                band_row = cur.fetchone()
+
             if not band_row:
                 return None
 
@@ -850,12 +867,12 @@ def get_user_band(user_id: str):
                 "invite_token": band_row["invite_token"],
                 "approval_factor": float(band_row["approval_factor"]),
                 "time_defaults": {
-                    "target_seconds":        band_row["default_target_seconds"],
-                    "warn_seconds":          band_row["default_warn_seconds"],
-                    "song_buffer_seconds":   band_row["default_song_buffer_seconds"],
-                    "tuning_change_seconds": band_row["default_tuning_change_seconds"],
-                    "break_count":           band_row["default_break_count"],
-                    "break_seconds":         band_row["default_break_seconds"],
+                    "target_seconds":        band_row.get("default_target_seconds",        SOLO_DEFAULT_SETTINGS["target_seconds"]),
+                    "warn_seconds":          band_row.get("default_warn_seconds",          SOLO_DEFAULT_SETTINGS["warn_seconds"]),
+                    "song_buffer_seconds":   band_row.get("default_song_buffer_seconds",   SOLO_DEFAULT_SETTINGS["song_buffer_seconds"]),
+                    "tuning_change_seconds": band_row.get("default_tuning_change_seconds", SOLO_DEFAULT_SETTINGS["tuning_change_seconds"]),
+                    "break_count":           band_row.get("default_break_count",           SOLO_DEFAULT_SETTINGS["break_count"]),
+                    "break_seconds":         band_row.get("default_break_seconds",         SOLO_DEFAULT_SETTINGS["break_seconds"]),
                 },
                 "role": band_row["role"],
                 "members": members,
