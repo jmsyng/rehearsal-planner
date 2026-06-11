@@ -2736,40 +2736,45 @@ async function switchSetlist(id) {
   renderLibrary();
 }
 
-async function loadActiveSetlist() {
-  // Restore last-used setlist id from localStorage, falling back to default.
-  const ownerKey = (_bandData?.id || _currentUserId || 'solo');
-  let storedId = null;
-  try { storedId = localStorage.getItem(`rp_setlist_${ownerKey}`); } catch {}
-  const inList = storedId && _setlists.some(sl => sl.id === storedId);
-  const target = inList ? storedId : (_setlists[0]?.id || null);
-  const url = target ? `/api/setlist?setlist_id=${encodeURIComponent(target)}` : '/api/setlist';
-  const res = await apiFetch(url);
-  if (res.ok) applySetlistResponse(await res.json());
-}
-
 async function loadAppData() {
   const overlay = document.getElementById('loading-overlay');
   overlay.style.display = 'flex';
   try {
-    const [songsRes, setlistsRes, setlistRes, tuningsRes] = await Promise.all([
+    // Read the stored active-set preference BEFORE the parallel fetch so it
+    // isn't clobbered by applySetlistResponse writing localStorage. _bandData /
+    // _currentUserId are already set by loadBandAndAppData, so ownerKey is valid.
+    const ownerKey = (_bandData?.id || _currentUserId || 'solo');
+    let storedId = null;
+    try { storedId = localStorage.getItem(`rp_setlist_${ownerKey}`); } catch {}
+    const setlistUrl = storedId
+      ? `/api/setlist?setlist_id=${encodeURIComponent(storedId)}`
+      : '/api/setlist';
+
+    const [songsRes, setlistsRes, setlistRes, tuningsRes, showsRes] = await Promise.all([
       apiFetch('/api/songs'),
       apiFetch('/api/setlists'),
-      apiFetch('/api/setlist'),
+      apiFetch(setlistUrl),
       apiFetch('/api/tunings'),
+      apiFetch('/api/shows'),
     ]);
     if (songsRes.status === 401) { signOut(); return; }
 
     libraryData     = await songsRes.json();
     _setlists       = setlistsRes.ok ? await setlistsRes.json() : [];
+    _shows          = showsRes.ok ? await showsRes.json() : [];
     allTuningValues = await tuningsRes.json();
     const csEl = document.getElementById('custom-song-tuning');
     if (csEl) populateTuningSelect(csEl, '');
 
-    // Apply the setlist — but if we have a stored preference, load that instead.
-    const defaultData = await setlistRes.json();
-    applySetlistResponse(defaultData);
-    await loadActiveSetlist();   // may switch to stored preference
+    // Apply the requested setlist. If a stored id was stale (deleted / not owned →
+    // 404/400 from _resolve_setlist), drop the preference and fall back to default.
+    if (setlistRes.ok) {
+      applySetlistResponse(await setlistRes.json());
+    } else if (storedId) {
+      try { localStorage.removeItem(`rp_setlist_${ownerKey}`); } catch {}
+      const fallback = await apiFetch('/api/setlist');
+      if (fallback.ok) applySetlistResponse(await fallback.json());
+    }
 
     if (libraryData.length === 0) {
       const seedRes = await apiFetch('/api/initial-songs');

@@ -683,7 +683,8 @@ def update_setlist_settings(setlist_id: str, settings: dict, *, user_id=None, ba
 
 
 def get_setlist_full(setlist_id: str) -> dict:
-    """Return {id, name, settings, entries:[{song_id, plays}]} for any setlist."""
+    """Return {id, setlist_id, name, settings, entries:[{song_id, plays}]} for any setlist.
+    `setlist_id` mirrors `id` — the frontend's applySetlistResponse keys off setlist_id."""
     conn = get_conn()
     try:
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
@@ -698,7 +699,10 @@ def get_setlist_full(setlist_id: str) -> dict:
             entries = [{"song_id": r["song_id"], "plays": r["plays"]} for r in cur.fetchall()]
         return {
             "id": str(sl["id"]),
+            "setlist_id": str(sl["id"]),  # frontend applySetlistResponse keys off this
             "name": sl["name"],
+            "show_id": str(sl["show_id"]) if sl.get("show_id") else None,
+            "position": sl.get("position"),
             "settings": _settings_from_row(sl),
             "entries": entries,
         }
