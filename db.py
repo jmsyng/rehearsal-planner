@@ -318,12 +318,12 @@ def _default_setlist_id(cur, *, user_id=None, band_id=None, create=False):
     """Return the owner's default (earliest) setlist id, optionally creating one."""
     if band_id:
         cur.execute(
-            "SELECT id FROM setlists WHERE band_id = %s ORDER BY created_at LIMIT 1",
+            "SELECT id FROM setlists WHERE band_id = %s ORDER BY created_at, id LIMIT 1",
             (band_id,)
         )
     else:
         cur.execute(
-            "SELECT id FROM setlists WHERE user_id = %s ORDER BY created_at LIMIT 1",
+            "SELECT id FROM setlists WHERE user_id = %s ORDER BY created_at, id LIMIT 1",
             (user_id,)
         )
     row = cur.fetchone()
@@ -628,12 +628,12 @@ def delete_setlist(setlist_id: str, *, user_id=None, band_id=None) -> str:
                 raise ValueError("not found")
             if band_id:
                 cur.execute(
-                    "SELECT id FROM setlists WHERE band_id = %s ORDER BY created_at",
+                    "SELECT id FROM setlists WHERE band_id = %s ORDER BY created_at, id",
                     (band_id,)
                 )
             else:
                 cur.execute(
-                    "SELECT id FROM setlists WHERE user_id = %s ORDER BY created_at",
+                    "SELECT id FROM setlists WHERE user_id = %s ORDER BY created_at, id",
                     (user_id,)
                 )
             all_ids = [str(r[0]) for r in cur.fetchall()]
