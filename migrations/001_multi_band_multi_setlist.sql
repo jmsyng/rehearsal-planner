@@ -165,9 +165,15 @@ WHERE s.band_id IS NULL;  -- personal songs only
 -- ── 6. Migrate band setlists ──────────────────────────────────────────────────
 -- One named setlist per band that had band_set_list_songs rows.
 
+-- FIXED (2026-06-10): the original `SELECT DISTINCT gen_random_uuid(), ...
+-- FROM band_set_list_songs` evaluated gen_random_uuid() per ROW, so DISTINCT
+-- never collapsed the rows — it created one "Main Set" per song row instead of
+-- one per band. DISTINCT the band_ids first, then mint one UUID per band.
+-- (Inert on prod, which already has 001 recorded in schema_migrations; this only
+-- protects a legacy pre-001 DB replaying migrations. Cleanup: migration 007.)
 INSERT INTO setlists (id, name, band_id, created_at, updated_at)
-SELECT DISTINCT gen_random_uuid(), 'Main Set', bsls.band_id, now(), now()
-FROM band_set_list_songs bsls;
+SELECT gen_random_uuid(), 'Main Set', b.band_id, now(), now()
+FROM (SELECT DISTINCT band_id FROM band_set_list_songs) b;
 
 INSERT INTO setlist_songs (setlist_id, song_id, position, plays)
 SELECT

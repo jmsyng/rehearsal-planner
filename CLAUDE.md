@@ -25,7 +25,7 @@ rehearsal-planner/
 ├── auth.py             # JWT validation via Neon Auth JWKS; @require_auth decorator
 ├── db.py               # Postgres CRUD (fresh connection per request — DO NOT add pooling, see Gotchas)
 ├── schema.sql          # Canonical DDL — reflects current target state; used by init_db.py (fresh DBs only)
-├── init_db.py          # Run once on a FRESH database to apply schema.sql — do NOT run on existing DBs
+├── init_db.py          # Run once on a FRESH database: applies schema.sql + pre-stamps schema_migrations — do NOT run on existing DBs
 ├── migrate.py          # Incremental migration runner — safe to run anytime; skips already-applied files
 ├── migrations/         # Numbered SQL migration files (001_..., 002_...) applied by migrate.py
 ├── requirements.txt    # Python deps
@@ -588,7 +588,7 @@ Completed the code changes to align with the new database schema (designed and m
 
 **Migration tooling (added in prior session, deployed here):**
 - `migrate.py` — apply any unapplied `migrations/*.sql` files; tracks state in `schema_migrations`; all-or-nothing transactions; safe to run any time.
-- `init_db.py` — **fresh databases only**. Running it on an existing DB will silently skip tables that already exist but won't apply incremental changes — use `migrate.py` for that.
+- `init_db.py` — **fresh databases only**. Running it on an existing DB will silently skip tables that already exist but won't apply incremental changes — use `migrate.py` for that. After applying `schema.sql`, it **pre-stamps `schema_migrations`** with every current `migrations/*.sql` filename (`ON CONFLICT DO NOTHING`), since `schema.sql` already reflects the post-migration target state. So a fresh DB is born "up to date": a subsequent `python3 migrate.py` is correctly a no-op and won't try to replay migration 001 (which references long-gone legacy tables `set_lists`/`set_list_songs`/`band_set_list_songs`) against the post-001 schema and crash.
 - For new schema changes: write `migrations/NNN_description.sql`, run `migrate.py` locally to test, then deploy. Update `schema.sql` to match so it stays the canonical description.
 
 **`db.py` (full rewrite completed in prior session, deployed here):**
@@ -761,6 +761,21 @@ Added a public, no-auth shareable link for each setlist. Branch: `claude/readonl
 - **`migrations/006_deduplicate_setlists.sql`** — removes empty duplicate setlists created during the window when migration 004 was not yet applied to prod. The `_default_setlist_id` savepoint fallback created a new empty row on each app load that tried the timing-column INSERT and failed; 006 keeps the setlist with the most songs per owner (oldest if tied) and deletes the rest, but only the empty ones (never deletes a setlist with songs). Applied to prod via `migrate.py`.
 - **Diagnosis tip:** the symptoms (ten "Main Set" entries in the switcher, create-setlist failing) were root-caused via **Vercel runtime logs** (`get_runtime_logs` MCP, project `prj_9GclRIPlSzABOMogn4Y0reP0E60t`, team `team_50uzQ1PIUjJUImH5JjwGj9Np`) — a `POST /api/setlists 500` before migration 004 landed, then `201`s after. When a prod UI bug is reported, check those logs first.
 - **Migration ordering gotcha:** `migrate.py` reads the migration files **from the checked-out branch**, not from the DB. A stale `git checkout` (branch ref pointed at an old commit) silently skipped 006 — `git pull origin <branch>` first, then re-run.
+
+### Session: Setlist Dedup, Active-Set Persistence & Shows (2026-06-10)
+
+Fixed the two reported setlist bugs and added a Set List Management interface (shows that group multiple sets in one night). Plan file: `~/.claude/plans/new-features-aren-t-working-rustling-alpaca.md`.
+
+**Bug A — duplicate "Main Set" (data + determinism):**
+- Root cause: `migrations/001` line ~168 did `SELECT DISTINCT gen_random_uuid(), 'Main Set', bsls.band_id FROM band_set_list_songs` — the per-row `gen_random_uuid()` defeats `DISTINCT`, minting one "Main Set" per *song row*. Band 14a19412 had 11 of them, all sharing one `created_at`. `_default_setlist_id`'s `ORDER BY created_at LIMIT 1` then picked non-deterministically on the tie, scattering saves.
+- `migrations/007_deduplicate_setlists_with_songs.sql` — among setlists sharing `(owner, name, created_at)`, keeps the most-songs row (lowest id on ties), backs the rest up into `setlists_dedup_backup` / `setlist_songs_dedup_backup`, then deletes. Applied to prod via `migrate.py` (deleted 9 rows, kept the 24-song keeper; backups hold 9 setlists / 61 songs).
+- Fixed `001` in place (DISTINCT the band_ids first — inert on prod, protects fresh replays) and added `, id` tie-breakers to every setlist `ORDER BY created_at` in `db.py`.
+
+**Bug B — active set "doesn't persist":** two compounding causes. (1) `GET /api/setlist` returned the id under key `id`, but `applySetlistResponse` reads `data.setlist_id` → `_currentSetlistId` never set → switcher couldn't highlight and saves hit the default. `get_setlist_full` now also returns `setlist_id`. (2) `loadAppData` wrote the `rp_setlist_<owner>` localStorage key (via `applySetlistResponse` on the default set) *before* `loadActiveSetlist` read it, clobbering the choice every load. Now reads the stored id up front, fetches it directly in the parallel batch, and falls back to default (clearing the key) on a stale 404/400. `loadActiveSetlist` removed.
+
+**Feature — Shows:** `migrations/008_shows.sql` + `schema.sql`: new `shows` table (band_id XOR user_id, name, show_date, venue, notes) and nullable `setlists.show_id` + `position` (order within show; `ON DELETE SET NULL` so deleting a show demotes its sets to standalone). `db.py`: `list_setlists` now LEFT JOINs a song aggregate (`song_count`, `total_seconds`) and returns `show_id`/`position`; new `list_shows`/`create_show`/`update_show`/`delete_show`/`set_show_set_order`/`assign_setlist_to_show`/`duplicate_setlist` mirror the `rename_setlist` ownership/commit pattern. `app.py`: `GET/POST /api/shows`, `PATCH/DELETE /api/shows/<id>` (PATCH also takes `set_order` for drag-reorder), `POST /api/setlists/<id>/duplicate`; `api_create_setlist`/`api_update_setlist` extended for `show_id` (null = standalone). Frontend: `_shows` global, 5th `/api/shows` fetch in `loadAppData`, optgrouped `renderSetlistSwitcher`, new `🗂` toolbar button + `#setlist-manager-modal` (copies the Band-Settings modal pattern) with `renderSetlistManager`/`initManagerSortables` (per-show SortableJS) and `manager*` CRUD handlers.
+
+**Verified:** migration dry-run + read-only SQL (0 dup groups, keeper 24 songs, backups populated, shows schema present); full API smoke on :5050 (`devtest_signin@example.com`/`DevTest!2345`) — determinism, show CRUD, duplicate, reorder, move, cascade-to-standalone, bad-date 400; UI on preview :5051 — optgroups, manager modal, Bug-B persistence across a simulated reload, stale-id fallback, mobile layout. **Note:** the dev test account is solo (no band) so the app routes it to band-setup; verification drove the solo path directly via `preview_eval` (set `_currentUserId`, call `loadAppData()`). `.claude/launch.json` corrected to bind **5051** (was 5050, which collides with the launchd server).
 
 ## Maintenance Pattern for This File
 

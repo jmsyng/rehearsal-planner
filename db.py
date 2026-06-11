@@ -318,12 +318,12 @@ def _default_setlist_id(cur, *, user_id=None, band_id=None, create=False):
     """Return the owner's default (earliest) setlist id, optionally creating one."""
     if band_id:
         cur.execute(
-            "SELECT id FROM setlists WHERE band_id = %s ORDER BY created_at LIMIT 1",
+            "SELECT id FROM setlists WHERE band_id = %s ORDER BY created_at, id LIMIT 1",
             (band_id,)
         )
     else:
         cur.execute(
-            "SELECT id FROM setlists WHERE user_id = %s ORDER BY created_at LIMIT 1",
+            "SELECT id FROM setlists WHERE user_id = %s ORDER BY created_at, id LIMIT 1",
             (user_id,)
         )
     row = cur.fetchone()
@@ -479,70 +479,99 @@ def _settings_from_row(row) -> dict:
     return {c: (row[c] if c in row else SOLO_DEFAULT_SETTINGS[c]) for c in _SETTINGS_COLS}
 
 
+_SETLIST_AGG_JOIN = """
+    LEFT JOIN (
+        SELECT ss.setlist_id,
+               COUNT(*)                          AS song_count,
+               SUM(so.duration_sec * ss.plays)   AS total_seconds
+        FROM setlist_songs ss
+        JOIN songs so ON so.id = ss.song_id
+        GROUP BY ss.setlist_id
+    ) a ON a.setlist_id = s.id
+"""
+
+
+def _setlist_summary(r: dict, is_default: bool) -> dict:
+    """Shape a setlists row (joined with the song aggregate) for the API."""
+    return {
+        "id": str(r["id"]),
+        "name": r["name"],
+        "is_default": is_default,
+        "show_id": str(r["show_id"]) if r.get("show_id") else None,
+        "position": r.get("position"),
+        "song_count": int(r.get("song_count") or 0),
+        "total_seconds": int(r.get("total_seconds") or 0),  # raw music seconds, no buffers
+        "settings": _settings_from_row(r),
+    }
+
+
 def list_setlists(*, user_id=None, band_id=None) -> list:
-    """Return all setlists for the owner, oldest first. Each dict includes settings."""
+    """Return all setlists for the owner, oldest first. Each dict includes settings,
+    show grouping (show_id/position), and song_count/total_seconds aggregates."""
     conn = get_conn()
     try:
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
             if band_id:
                 cur.execute(
-                    "SELECT * FROM setlists WHERE band_id = %s ORDER BY created_at",
+                    "SELECT s.*, a.song_count, a.total_seconds FROM setlists s"
+                    + _SETLIST_AGG_JOIN +
+                    " WHERE s.band_id = %s ORDER BY s.created_at, s.id",
                     (band_id,)
                 )
             else:
                 cur.execute(
-                    "SELECT * FROM setlists WHERE user_id = %s ORDER BY created_at",
+                    "SELECT s.*, a.song_count, a.total_seconds FROM setlists s"
+                    + _SETLIST_AGG_JOIN +
+                    " WHERE s.user_id = %s ORDER BY s.created_at, s.id",
                     (user_id,)
                 )
             rows = cur.fetchall()
-        result = []
-        for i, r in enumerate(rows):
-            result.append({
-                "id": str(r["id"]),
-                "name": r["name"],
-                "is_default": i == 0,
-                "settings": _settings_from_row(r),
-            })
-        return result
+        return [_setlist_summary(r, i == 0) for i, r in enumerate(rows)]
     finally:
         put_conn(conn)
 
 
-def create_setlist(name: str, *, user_id=None, band_id=None) -> dict:
-    """Create a new named setlist, seeded from band defaults (or SOLO_DEFAULT_SETTINGS)."""
+def create_setlist(name: str, *, user_id=None, band_id=None, show_id=None) -> dict:
+    """Create a new named setlist, seeded from band defaults (or SOLO_DEFAULT_SETTINGS).
+    If show_id is given, the set is appended to that show (validated for ownership)."""
     conn = get_conn()
     try:
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            position = None
+            if show_id is not None:
+                if not _owns_show(cur, show_id, user_id=user_id, band_id=band_id):
+                    raise ValueError("show not found")
+                cur.execute(
+                    "SELECT COALESCE(MAX(position) + 1, 0) AS p FROM setlists WHERE show_id = %s",
+                    (show_id,)
+                )
+                position = cur.fetchone()["p"]
             if band_id:
                 cur.execute("""
-                    INSERT INTO setlists (name, band_id,
+                    INSERT INTO setlists (name, band_id, show_id, position,
                         target_seconds, warn_seconds, song_buffer_seconds,
                         tuning_change_seconds, break_count, break_seconds)
-                    SELECT %s, %s,
+                    SELECT %s, %s, %s, %s,
                         b.default_target_seconds, b.default_warn_seconds,
                         b.default_song_buffer_seconds, b.default_tuning_change_seconds,
                         b.default_break_count, b.default_break_seconds
                     FROM bands b WHERE b.id = %s
                     RETURNING *
-                """, (name, band_id, band_id))
+                """, (name, band_id, show_id, position, band_id))
             else:
                 d = SOLO_DEFAULT_SETTINGS
                 cur.execute("""
-                    INSERT INTO setlists (name, user_id,
+                    INSERT INTO setlists (name, user_id, show_id, position,
                         target_seconds, warn_seconds, song_buffer_seconds,
                         tuning_change_seconds, break_count, break_seconds)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s) RETURNING *
-                """, (name, user_id, d["target_seconds"], d["warn_seconds"],
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING *
+                """, (name, user_id, show_id, position,
+                      d["target_seconds"], d["warn_seconds"],
                       d["song_buffer_seconds"], d["tuning_change_seconds"],
                       d["break_count"], d["break_seconds"]))
             row = cur.fetchone()
         conn.commit()
-        return {
-            "id": str(row["id"]),
-            "name": row["name"],
-            "is_default": False,
-            "settings": _settings_from_row(row),
-        }
+        return _setlist_summary(row, False)
     except Exception:
         conn.rollback()
         raise
@@ -628,12 +657,12 @@ def delete_setlist(setlist_id: str, *, user_id=None, band_id=None) -> str:
                 raise ValueError("not found")
             if band_id:
                 cur.execute(
-                    "SELECT id FROM setlists WHERE band_id = %s ORDER BY created_at",
+                    "SELECT id FROM setlists WHERE band_id = %s ORDER BY created_at, id",
                     (band_id,)
                 )
             else:
                 cur.execute(
-                    "SELECT id FROM setlists WHERE user_id = %s ORDER BY created_at",
+                    "SELECT id FROM setlists WHERE user_id = %s ORDER BY created_at, id",
                     (user_id,)
                 )
             all_ids = [str(r[0]) for r in cur.fetchall()]
@@ -683,7 +712,8 @@ def update_setlist_settings(setlist_id: str, settings: dict, *, user_id=None, ba
 
 
 def get_setlist_full(setlist_id: str) -> dict:
-    """Return {id, name, settings, entries:[{song_id, plays}]} for any setlist."""
+    """Return {id, setlist_id, name, settings, entries:[{song_id, plays}]} for any setlist.
+    `setlist_id` mirrors `id` — the frontend's applySetlistResponse keys off setlist_id."""
     conn = get_conn()
     try:
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
@@ -698,7 +728,10 @@ def get_setlist_full(setlist_id: str) -> dict:
             entries = [{"song_id": r["song_id"], "plays": r["plays"]} for r in cur.fetchall()]
         return {
             "id": str(sl["id"]),
+            "setlist_id": str(sl["id"]),  # frontend applySetlistResponse keys off this
             "name": sl["name"],
+            "show_id": str(sl["show_id"]) if sl.get("show_id") else None,
+            "position": sl.get("position"),
             "settings": _settings_from_row(sl),
             "entries": entries,
         }
@@ -719,6 +752,206 @@ def save_setlist_entries(setlist_id: str, entries: list) -> None:
                 )
             cur.execute("UPDATE setlists SET updated_at = now() WHERE id = %s", (setlist_id,))
         conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        put_conn(conn)
+
+
+# ── Shows ─────────────────────────────────────────────────────────────────────
+#
+# A show groups multiple ordered setlists for one performance night. Setlists
+# reference it via setlists.show_id; order within the show is setlists.position.
+
+def _owns_show(cur, show_id: str, *, user_id=None, band_id=None) -> bool:
+    """Return True if the given owner owns show_id."""
+    if band_id:
+        cur.execute("SELECT 1 FROM shows WHERE id = %s AND band_id = %s", (show_id, band_id))
+    else:
+        cur.execute("SELECT 1 FROM shows WHERE id = %s AND user_id = %s", (show_id, user_id))
+    return cur.fetchone() is not None
+
+
+def _show_to_dict(r) -> dict:
+    return {
+        "id": str(r["id"]),
+        "name": r["name"],
+        "show_date": r["show_date"].isoformat() if r["show_date"] else None,
+        "venue": r["venue"],
+        "notes": r["notes"],
+    }
+
+
+def list_shows(*, user_id=None, band_id=None) -> list:
+    """Return the owner's shows, earliest dated first (undated last)."""
+    conn = get_conn()
+    try:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            if band_id:
+                cur.execute(
+                    "SELECT * FROM shows WHERE band_id = %s "
+                    "ORDER BY show_date ASC NULLS LAST, created_at, id", (band_id,))
+            else:
+                cur.execute(
+                    "SELECT * FROM shows WHERE user_id = %s "
+                    "ORDER BY show_date ASC NULLS LAST, created_at, id", (user_id,))
+            return [_show_to_dict(r) for r in cur.fetchall()]
+    finally:
+        put_conn(conn)
+
+
+def create_show(name: str, show_date=None, venue=None, notes=None, *,
+                user_id=None, band_id=None) -> dict:
+    """Create a new show for the owner."""
+    conn = get_conn()
+    try:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute("""
+                INSERT INTO shows (band_id, user_id, name, show_date, venue, notes)
+                VALUES (%s, %s, %s, %s, %s, %s) RETURNING *
+            """, (band_id, user_id, name, show_date, venue, notes))
+            row = cur.fetchone()
+        conn.commit()
+        return _show_to_dict(row)
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        put_conn(conn)
+
+
+def update_show(show_id: str, fields: dict, *, user_id=None, band_id=None) -> dict:
+    """Partial-update a show. Recognised keys: name, show_date, venue, notes.
+    Raises ValueError('not found') if the owner doesn't own it."""
+    conn = get_conn()
+    try:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            if not _owns_show(cur, show_id, user_id=user_id, band_id=band_id):
+                raise ValueError("not found")
+            sets, vals = [], []
+            for key in ("name", "show_date", "venue", "notes"):
+                if key in fields:
+                    sets.append(f"{key} = %s")
+                    vals.append(fields[key])
+            if sets:
+                vals.append(show_id)
+                cur.execute(f"UPDATE shows SET {', '.join(sets)} WHERE id = %s", vals)
+            cur.execute("SELECT * FROM shows WHERE id = %s", (show_id,))
+            row = cur.fetchone()
+        conn.commit()
+        return _show_to_dict(row)
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        put_conn(conn)
+
+
+def delete_show(show_id: str, *, user_id=None, band_id=None) -> None:
+    """Delete a show; its setlists become standalone (show_id/position cleared)."""
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            if not _owns_show(cur, show_id, user_id=user_id, band_id=band_id):
+                raise ValueError("not found")
+            # FK is ON DELETE SET NULL for show_id, but position must be cleared too.
+            cur.execute(
+                "UPDATE setlists SET position = NULL WHERE show_id = %s", (show_id,))
+            cur.execute("DELETE FROM shows WHERE id = %s", (show_id,))
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        put_conn(conn)
+
+
+def set_show_set_order(show_id: str, ordered_ids: list, *, user_id=None, band_id=None) -> None:
+    """Reorder the setlists within a show. Only sets actually in the show are touched."""
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            if not _owns_show(cur, show_id, user_id=user_id, band_id=band_id):
+                raise ValueError("not found")
+            for i, sid in enumerate(ordered_ids):
+                cur.execute(
+                    "UPDATE setlists SET position = %s WHERE id = %s AND show_id = %s",
+                    (i, sid, show_id))
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        put_conn(conn)
+
+
+def assign_setlist_to_show(setlist_id: str, show_id, *, user_id=None, band_id=None) -> None:
+    """Move a setlist into a show (appended at the end) or, if show_id is None,
+    make it standalone. Raises ValueError if ownership checks fail."""
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            if not _owns_setlist(cur, setlist_id, user_id=user_id, band_id=band_id):
+                raise ValueError("not found")
+            if show_id is None:
+                cur.execute(
+                    "UPDATE setlists SET show_id = NULL, position = NULL, updated_at = now() "
+                    "WHERE id = %s", (setlist_id,))
+            else:
+                if not _owns_show(cur, show_id, user_id=user_id, band_id=band_id):
+                    raise ValueError("show not found")
+                cur.execute(
+                    "SELECT COALESCE(MAX(position) + 1, 0) AS p FROM setlists WHERE show_id = %s",
+                    (show_id,))
+                pos = cur.fetchone()[0]
+                cur.execute(
+                    "UPDATE setlists SET show_id = %s, position = %s, updated_at = now() "
+                    "WHERE id = %s", (show_id, pos, setlist_id))
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        put_conn(conn)
+
+
+def duplicate_setlist(setlist_id: str, name=None, *, user_id=None, band_id=None) -> dict:
+    """Copy a setlist (songs + timing settings) into a new standalone setlist.
+    Default name is '<original> (copy)'. Returns a list_setlists-shaped dict."""
+    conn = get_conn()
+    try:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            if not _owns_setlist(cur, setlist_id, user_id=user_id, band_id=band_id):
+                raise ValueError("not found")
+            cur.execute("SELECT name FROM setlists WHERE id = %s", (setlist_id,))
+            src_name = cur.fetchone()["name"]
+            new_name = (name or "").strip() or f"{src_name} (copy)"
+            # New row: copy owner + timing settings; fresh share_token (column default);
+            # show_id/position left NULL so the copy lands standalone.
+            cur.execute("""
+                INSERT INTO setlists (name, band_id, user_id,
+                    target_seconds, warn_seconds, song_buffer_seconds,
+                    tuning_change_seconds, break_count, break_seconds)
+                SELECT %s, band_id, user_id,
+                    target_seconds, warn_seconds, song_buffer_seconds,
+                    tuning_change_seconds, break_count, break_seconds
+                FROM setlists WHERE id = %s
+                RETURNING id
+            """, (new_name, setlist_id))
+            new_id = cur.fetchone()["id"]
+            cur.execute("""
+                INSERT INTO setlist_songs (setlist_id, song_id, position, plays)
+                SELECT %s, song_id, position, plays
+                FROM setlist_songs WHERE setlist_id = %s
+            """, (new_id, setlist_id))
+            # Re-read the new row with the song aggregate for an accurate summary.
+            cur.execute(
+                "SELECT s.*, a.song_count, a.total_seconds FROM setlists s"
+                + _SETLIST_AGG_JOIN + " WHERE s.id = %s", (new_id,))
+            row = cur.fetchone()
+        conn.commit()
+        return _setlist_summary(row, False)
     except Exception:
         conn.rollback()
         raise
