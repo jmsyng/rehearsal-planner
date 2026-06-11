@@ -2035,6 +2035,28 @@
   </div>
 </div>
 
+<!-- Set List Management: shows + sets -->
+<div id="setlist-manager-modal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,.7); z-index:1500; flex-direction:column; align-items:center; justify-content:center; padding:20px;">
+  <div style="background:var(--surface); border:1px solid var(--border); border-radius:var(--radius); padding:24px; max-width:460px; width:100%; max-height:90vh; overflow-y:auto;">
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
+      <h2 style="margin:0; font-size:18px;">Shows &amp; Set Lists</h2>
+      <button onclick="document.getElementById('setlist-manager-modal').style.display='none'" style="background:none; border:none; font-size:24px; cursor:pointer; color:var(--text-dim); padding:0; width:30px; height:30px; display:flex; align-items:center; justify-content:center; line-height:1;">×</button>
+    </div>
+
+    <div class="settings-section">
+      <h3>New show</h3>
+      <div style="display:flex; gap:8px; flex-wrap:wrap;">
+        <input id="manager-new-show-name" class="settings-input" style="flex:1; min-width:140px;" placeholder="e.g. Friday at The Anchor" />
+        <input id="manager-new-show-date" type="date" class="settings-input" style="width:150px; flex:none;" />
+        <button class="settings-btn" onclick="managerCreateShow()">Create</button>
+      </div>
+      <p style="font-size:11px; color:var(--text-dim); margin-top:6px;">A show groups multiple sets played in one night.</p>
+    </div>
+
+    <div id="manager-shows"></div>
+  </div>
+</div>
+
 <style>
   /* ── App menu + settings UI ──────────────────────────────────────────── */
   .app-menu-item {
@@ -2068,6 +2090,49 @@
   }
   .settings-btn.danger { background: var(--red); }
   .settings-btn:disabled { opacity: .5; cursor: default; }
+
+  /* ── Set List Manager ─────────────────────────────────────────────────── */
+  .manager-show {
+    border: 1px solid var(--border); border-radius: 8px;
+    padding: 12px; margin-bottom: 14px;
+  }
+  .manager-show.standalone { background: var(--bg); }
+  .manager-show-header {
+    display: flex; align-items: center; gap: 8px; margin-bottom: 10px;
+  }
+  .manager-show-header .title {
+    font-size: 14px; font-weight: 700; flex: 1;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .manager-show-header .date { font-size: 12px; color: var(--text-dim); }
+  .manager-icon-btn {
+    background: none; border: none; cursor: pointer; color: var(--text-dim);
+    font-size: 14px; padding: 2px 4px; line-height: 1;
+  }
+  .manager-icon-btn:hover { color: var(--text); }
+  .manager-set-list { display: flex; flex-direction: column; gap: 6px; }
+  .manager-set-row {
+    display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 6px; padding: 7px 9px;
+  }
+  .manager-set-row.active { border-color: var(--setlist-accent, var(--accent)); background: var(--setlist-accent-tint, var(--accent-dim)); }
+  .manager-set-row .drag-handle { cursor: grab; color: var(--text-dim); font-size: 14px; }
+  .manager-set-row .set-name {
+    flex: 1 1 120px; min-width: 90px; font-size: 13px; font-weight: 600; cursor: pointer;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .manager-set-row .set-name:hover { text-decoration: underline; }
+  .manager-set-row .set-meta { font-size: 11px; color: var(--text-dim); white-space: nowrap; }
+  .manager-set-row .move-select {
+    background: var(--bg); border: 1px solid var(--border); color: var(--text);
+    font-size: 11px; border-radius: 4px; padding: 2px 4px; max-width: 90px;
+  }
+  .manager-add-set {
+    background: transparent; color: var(--text-dim); border: 1px dashed var(--border);
+    border-radius: 6px; padding: 6px; font-size: 12px; cursor: pointer; margin-top: 8px; width: 100%;
+  }
+  .manager-add-set:hover { color: var(--text); border-color: var(--text-dim); }
 
   .role-chip {
     font-size: 12px; padding: 5px 12px; border-radius: 16px; cursor: pointer;
@@ -2245,6 +2310,7 @@
       <div class="panel-tools" id="setlist-tools">
         <select class="toolbar-select" id="setlist-switcher" aria-label="Switch set list" onchange="switchSetlist(this.value)" style="max-width:120px;"></select>
         <button class="toolbar-btn" id="setlist-new-btn" onclick="promptCreateSetlist()" title="New set list" aria-label="New set list">＋</button>
+        <button class="toolbar-btn" id="setlist-manage-btn" onclick="openSetlistManager()" title="Shows &amp; set lists" aria-label="Manage shows and set lists">🗂</button>
         <select class="toolbar-select" id="set-group-by" title="Group set list" aria-label="Group set list">
           <option value="">No grouping</option>
           <option value="tuning">Group by tuning</option>
@@ -2314,7 +2380,8 @@ const LIKERT_EMOJI      = { '5': '❤️', '4': '👍', '3': '😐', '2': '👎'
 let libraryData = [];   // [{id, name, duration_raw, duration_seconds, plays, extra}]
 let setListIds  = [];   // ordered list of ids currently in the set list
 let _currentSetlistId = null;   // active setlist UUID
-let _setlists = [];             // [{id, name, is_default, settings}] for the switcher
+let _setlists = [];             // [{id, name, is_default, show_id, position, song_count, total_seconds, settings}]
+let _shows = [];                // [{id, name, show_date, venue, notes}] — gigs grouping setlists
 let librarySearchText = '';  // tracks search text in library
 let setListSearchText = '';  // tracks search text in set list
 let expandedSongId = null;  // tracks which song card is currently expanded
@@ -2539,7 +2606,10 @@ function signOut() {
   sessionStorage.removeItem('rp_dev_session');
   libraryData     = [];
   setListIds      = [];
+  _setlists       = [];
+  _shows          = [];
   allTuningValues = ['E standard', 'Eb', 'Drop D', 'Drop C#'];
+  document.getElementById('setlist-manager-modal').style.display = 'none';
   document.getElementById('auth-overlay').style.display       = 'flex';
   document.getElementById('user-info').style.display          = 'none';
   document.getElementById('band-setup-overlay').style.display = 'none';
@@ -2713,17 +2783,48 @@ function applySetlistResponse(data) {
   }
 }
 
+// Format an ISO 'YYYY-MM-DD' as a short local date without TZ off-by-one.
+function fmtShowDate(iso) {
+  if (!iso) return '';
+  const d = new Date(iso + 'T00:00:00');
+  return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+}
+
 function renderSetlistSwitcher() {
   const sel = document.getElementById('setlist-switcher');
   if (!sel) return;
   sel.innerHTML = '';
-  _setlists.forEach(sl => {
+  const addOption = (sl, parent) => {
     const opt = document.createElement('option');
     opt.value = sl.id;
     opt.textContent = sl.name;
     if (sl.id === _currentSetlistId) opt.selected = true;
-    sel.appendChild(opt);
+    parent.appendChild(opt);
+  };
+  // No shows → flat list (unchanged behaviour).
+  if (!_shows.length) {
+    _setlists.forEach(sl => addOption(sl, sel));
+    return;
+  }
+  // One <optgroup> per show (sets ordered by position), then standalone sets.
+  _shows.forEach(show => {
+    const sets = _setlists
+      .filter(sl => sl.show_id === show.id)
+      .sort((a, b) => (a.position ?? 0) - (b.position ?? 0));
+    if (!sets.length) return;
+    const og = document.createElement('optgroup');
+    const date = fmtShowDate(show.show_date);
+    og.label = date ? `${show.name} · ${date}` : show.name;
+    sets.forEach(sl => addOption(sl, og));
+    sel.appendChild(og);
   });
+  const standalone = _setlists.filter(sl => !sl.show_id);
+  if (standalone.length) {
+    const og = document.createElement('optgroup');
+    og.label = 'Standalone sets';
+    standalone.forEach(sl => addOption(sl, og));
+    sel.appendChild(og);
+  }
 }
 
 async function switchSetlist(id) {
@@ -4977,17 +5078,22 @@ async function renameCurrentSetlist() {
   showToast(`✓ Renamed to "${name}"`);
 }
 
-async function promptCreateSetlist() {
+async function promptCreateSetlist(showId) {
   const name = prompt('New set list name:');
   if (!name || !name.trim()) return;
+  const body = { name: name.trim() };
+  if (showId) body.show_id = showId;
   const res = await apiFetch('/api/setlists', {
     method: 'POST',
-    body: JSON.stringify({ name: name.trim() }),
+    body: JSON.stringify(body),
   });
   if (!res.ok) { showToast('Failed to create set list'); return; }
   const sl = await res.json();
   _setlists.push(sl);
   renderSetlistSwitcher();
+  if (document.getElementById('setlist-manager-modal').style.display === 'flex') {
+    renderSetlistManager();
+  }
   await switchSetlist(sl.id);
   showToast(`✓ Created "${sl.name}"`);
 }
@@ -5004,6 +5110,246 @@ async function deleteCurrentSetlist() {
   await switchSetlist(new_default_id);
   renderSetlistSwitcher();
   showToast('✓ Set list deleted');
+}
+
+// ── Set List Manager (shows + sets) ───────────────────────────────────────────────
+
+let _managerEditingShowId = null;  // which show header is in inline-edit mode
+
+async function refreshSetlists() {
+  const res = await apiFetch('/api/setlists');
+  if (res.ok) _setlists = await res.json();
+}
+
+async function openSetlistManager() {
+  // Pull fresh setlists + shows so counts/durations and grouping are current.
+  const [setlistsRes, showsRes] = await Promise.all([
+    apiFetch('/api/setlists'),
+    apiFetch('/api/shows'),
+  ]);
+  if (setlistsRes.ok) _setlists = await setlistsRes.json();
+  if (showsRes.ok) _shows = await showsRes.json();
+  _managerEditingShowId = null;
+  renderSetlistManager();
+  document.getElementById('setlist-manager-modal').style.display = 'flex';
+}
+
+function setMetaLabel(sl) {
+  const mins = Math.round((sl.total_seconds || 0) / 60);
+  const n = sl.song_count || 0;
+  return `${n} song${n === 1 ? '' : 's'} · ${mins} min`;
+}
+
+function moveSelectHtml(sl) {
+  const opts = _shows.map(sh =>
+    `<option value="${sh.id}" ${sl.show_id === sh.id ? 'selected' : ''}>${escapeHtml(sh.name)}</option>`
+  ).join('');
+  return `<select class="move-select" title="Move to show"
+            onchange="managerMoveSet('${sl.id}', this.value)">
+            <option value="" ${!sl.show_id ? 'selected' : ''}>Standalone</option>
+            ${opts}
+          </select>`;
+}
+
+function setRowHtml(sl, withHandle) {
+  const active = sl.id === _currentSetlistId;
+  return `<div class="manager-set-row ${active ? 'active' : ''}" data-set-id="${sl.id}">
+    ${withHandle ? '<span class="drag-handle">⠿</span>' : ''}
+    <span class="set-name" title="Make active" onclick="managerActivateSet('${sl.id}')">${escapeHtml(sl.name)}</span>
+    <span class="set-meta">${setMetaLabel(sl)}</span>
+    <button class="manager-icon-btn" title="Rename" onclick="managerRenameSet('${sl.id}')">✎</button>
+    <button class="manager-icon-btn" title="Duplicate" onclick="managerDuplicateSet('${sl.id}')">⧉</button>
+    ${moveSelectHtml(sl)}
+    <button class="manager-icon-btn" title="Delete set" onclick="managerDeleteSet('${sl.id}')">×</button>
+  </div>`;
+}
+
+function showHeaderHtml(show) {
+  if (_managerEditingShowId === show.id) {
+    return `<div style="display:flex; gap:6px; flex-wrap:wrap; flex:1; align-items:center;">
+      <input id="manager-edit-name-${show.id}" class="settings-input" style="flex:1; min-width:120px;" value="${escapeHtml(show.name)}" placeholder="Show name" />
+      <input id="manager-edit-date-${show.id}" type="date" class="settings-input" style="width:140px; flex:none;" value="${show.show_date || ''}" />
+      <input id="manager-edit-venue-${show.id}" class="settings-input" style="flex:1; min-width:120px;" value="${escapeHtml(show.venue || '')}" placeholder="Venue (optional)" />
+      <button class="settings-btn" onclick="managerSaveShow('${show.id}')">Save</button>
+      <button class="settings-btn ghost" onclick="managerCancelEditShow()">Cancel</button>
+    </div>`;
+  }
+  const date = fmtShowDate(show.show_date);
+  return `<span class="title">${escapeHtml(show.name)}</span>
+    ${date ? `<span class="date">${date}</span>` : ''}
+    ${show.venue ? `<span class="date">· ${escapeHtml(show.venue)}</span>` : ''}
+    <button class="manager-icon-btn" title="Edit show" onclick="managerToggleEditShow('${show.id}')">✎</button>
+    <button class="manager-icon-btn" title="Delete show" onclick="managerDeleteShow('${show.id}')">🗑</button>`;
+}
+
+function renderSetlistManager() {
+  const container = document.getElementById('manager-shows');
+  if (!container) return;
+  let html = '';
+  _shows.forEach(show => {
+    const sets = _setlists
+      .filter(sl => sl.show_id === show.id)
+      .sort((a, b) => (a.position ?? 0) - (b.position ?? 0));
+    html += `<div class="manager-show">
+      <div class="manager-show-header">${showHeaderHtml(show)}</div>
+      <div class="manager-set-list" data-show-id="${show.id}">
+        ${sets.map(sl => setRowHtml(sl, true)).join('')}
+      </div>
+      <button class="manager-add-set" onclick="promptCreateSetlist('${show.id}')">+ Add set to this show</button>
+    </div>`;
+  });
+  const standalone = _setlists.filter(sl => !sl.show_id);
+  html += `<div class="manager-show standalone">
+    <div class="manager-show-header"><span class="title">Standalone sets</span></div>
+    <div class="manager-set-list" data-show-id="">
+      ${standalone.map(sl => setRowHtml(sl, false)).join('')}
+    </div>
+    <button class="manager-add-set" onclick="promptCreateSetlist()">+ Add standalone set</button>
+  </div>`;
+  container.innerHTML = html;
+  initManagerSortables();
+}
+
+function initManagerSortables() {
+  document.querySelectorAll('#manager-shows .manager-set-list[data-show-id]').forEach(list => {
+    const showId = list.getAttribute('data-show-id');
+    if (!showId) return;  // standalone group is not reorderable
+    Sortable.create(list, {
+      handle: '.drag-handle',
+      animation: 150,
+      ghostClass: 'sortable-ghost',
+      dragClass: 'sortable-drag',
+      async onEnd() {
+        const ids = [...list.querySelectorAll('.manager-set-row')].map(el => el.getAttribute('data-set-id'));
+        const res = await apiFetch(`/api/shows/${showId}`, {
+          method: 'PATCH',
+          body: JSON.stringify({ set_order: ids }),
+        });
+        if (!res.ok) { showToast('Failed to reorder'); return; }
+        // Patch local positions to match the new order.
+        ids.forEach((id, i) => {
+          const sl = _setlists.find(s => s.id === id);
+          if (sl) sl.position = i;
+        });
+        renderSetlistSwitcher();
+      },
+    });
+  });
+}
+
+async function managerCreateShow() {
+  const nameEl = document.getElementById('manager-new-show-name');
+  const dateEl = document.getElementById('manager-new-show-date');
+  const name = nameEl.value.trim();
+  if (!name) { showToast('Show name is required'); return; }
+  const res = await apiFetch('/api/shows', {
+    method: 'POST',
+    body: JSON.stringify({ name, show_date: dateEl.value || null }),
+  });
+  if (!res.ok) { showToast('Failed to create show'); return; }
+  const show = await res.json();
+  _shows.push(show);
+  nameEl.value = ''; dateEl.value = '';
+  renderSetlistManager();
+  renderSetlistSwitcher();
+  showToast(`✓ Created "${show.name}"`);
+}
+
+function managerToggleEditShow(id) {
+  _managerEditingShowId = id;
+  renderSetlistManager();
+}
+
+function managerCancelEditShow() {
+  _managerEditingShowId = null;
+  renderSetlistManager();
+}
+
+async function managerSaveShow(id) {
+  const name = document.getElementById(`manager-edit-name-${id}`).value.trim();
+  if (!name) { showToast('Show name is required'); return; }
+  const date = document.getElementById(`manager-edit-date-${id}`).value || null;
+  const venue = document.getElementById(`manager-edit-venue-${id}`).value.trim() || null;
+  const res = await apiFetch(`/api/shows/${id}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ name, show_date: date, venue }),
+  });
+  if (!res.ok) { showToast('Failed to save show'); return; }
+  const updated = await res.json();
+  const show = _shows.find(s => s.id === id);
+  if (show) Object.assign(show, updated);
+  _managerEditingShowId = null;
+  renderSetlistManager();
+  renderSetlistSwitcher();
+  showToast('✓ Show saved');
+}
+
+async function managerDeleteShow(id) {
+  const show = _shows.find(s => s.id === id);
+  if (!confirm(`Delete "${show?.name || 'this show'}"? Its sets become standalone.`)) return;
+  const res = await apiFetch(`/api/shows/${id}`, { method: 'DELETE' });
+  if (!res.ok) { showToast('Failed to delete show'); return; }
+  _shows = _shows.filter(s => s.id !== id);
+  // Locally demote its sets to standalone.
+  _setlists.forEach(sl => { if (sl.show_id === id) { sl.show_id = null; sl.position = null; } });
+  renderSetlistManager();
+  renderSetlistSwitcher();
+  showToast('✓ Show deleted');
+}
+
+async function managerRenameSet(id) {
+  const sl = _setlists.find(s => s.id === id);
+  const name = prompt('Rename set list:', sl?.name || '');
+  if (name === null || !name.trim()) return;
+  const res = await apiFetch(`/api/setlists/${id}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ name: name.trim() }),
+  });
+  if (!res.ok) { showToast('Failed to rename'); return; }
+  if (sl) sl.name = name.trim();
+  renderSetlistManager();
+  renderSetlistSwitcher();
+}
+
+async function managerDuplicateSet(id) {
+  const res = await apiFetch(`/api/setlists/${id}/duplicate`, { method: 'POST', body: '{}' });
+  if (!res.ok) { showToast('Failed to duplicate'); return; }
+  const sl = await res.json();
+  _setlists.push(sl);
+  renderSetlistManager();
+  renderSetlistSwitcher();
+  showToast(`✓ Duplicated as "${sl.name}"`);
+}
+
+async function managerMoveSet(id, showIdOrEmpty) {
+  const res = await apiFetch(`/api/setlists/${id}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ show_id: showIdOrEmpty || null }),
+  });
+  if (!res.ok) { showToast('Failed to move set'); renderSetlistManager(); return; }
+  // Refetch so server-assigned positions are reflected.
+  await refreshSetlists();
+  renderSetlistManager();
+  renderSetlistSwitcher();
+}
+
+async function managerDeleteSet(id) {
+  if (_setlists.length <= 1) { showToast('Cannot delete the last set list'); return; }
+  const sl = _setlists.find(s => s.id === id);
+  if (!confirm(`Delete "${sl?.name || 'this set list'}"? This cannot be undone.`)) return;
+  const res = await apiFetch(`/api/setlists/${id}`, { method: 'DELETE' });
+  if (!res.ok) { showToast('Failed to delete set list'); return; }
+  const { new_default_id } = await res.json();
+  _setlists = _setlists.filter(s => s.id !== id);
+  if (id === _currentSetlistId) await switchSetlist(new_default_id);
+  renderSetlistManager();
+  renderSetlistSwitcher();
+  showToast('✓ Set list deleted');
+}
+
+async function managerActivateSet(id) {
+  await switchSetlist(id);
+  document.getElementById('setlist-manager-modal').style.display = 'none';
 }
 
 // ── My Settings Modal ────────────────────────────────────────────────────────────

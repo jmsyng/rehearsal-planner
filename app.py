@@ -1,6 +1,7 @@
 from dotenv import load_dotenv
 load_dotenv()
 
+import datetime
 import json
 import os
 import sys
@@ -266,11 +267,14 @@ def api_create_setlist():
     name = (data.get("name") or "").strip()
     if not name:
         return jsonify({"error": "name is required"}), 400
+    show_id = data.get("show_id")
     band = db.get_user_band(g.user_id)
-    if band:
-        sl = db.create_setlist(name, band_id=band["id"])
-    else:
-        sl = db.create_setlist(name, user_id=g.user_id)
+    band_id = band["id"] if band else None
+    user_id = None if band_id else g.user_id
+    try:
+        sl = db.create_setlist(name, band_id=band_id, user_id=user_id, show_id=show_id)
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 404
     return jsonify(sl), 201
 
 
@@ -290,6 +294,10 @@ def api_update_setlist(setlist_id):
         if "settings" in data:
             db.update_setlist_settings(setlist_id, data["settings"],
                                        band_id=band_id, user_id=user_id)
+        if "show_id" in data:
+            # null → make standalone; otherwise append to the named show.
+            db.assign_setlist_to_show(setlist_id, data["show_id"],
+                                      band_id=band_id, user_id=user_id)
     except ValueError as e:
         return jsonify({"error": str(e)}), 404
     sl = db.get_setlist_full(setlist_id)
@@ -358,6 +366,112 @@ def api_get_setlist_share():
     if err:
         return err
     return jsonify({"token": db.get_setlist_share_token(sid)})
+
+
+@app.route("/api/setlists/<setlist_id>/duplicate", methods=["POST"])
+@require_auth
+def api_duplicate_setlist(setlist_id):
+    band = db.get_user_band(g.user_id)
+    band_id = band["id"] if band else None
+    user_id = None if band_id else g.user_id
+    data = request.get_json(silent=True) or {}
+    try:
+        sl = db.duplicate_setlist(setlist_id, data.get("name"),
+                                  band_id=band_id, user_id=user_id)
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 404
+    return jsonify(sl), 201
+
+
+# ── Shows API ──────────────────────────────────────────────────────────────────
+
+def _parse_show_date(raw):
+    """Returns (date_or_None, error_response_or_None). Accepts ISO 'YYYY-MM-DD',
+    None, or '' (both clear the date)."""
+    if raw is None or raw == "":
+        return None, None
+    try:
+        return datetime.date.fromisoformat(raw), None
+    except (ValueError, TypeError):
+        return None, (jsonify({"error": "show_date must be YYYY-MM-DD"}), 400)
+
+
+@app.route("/api/shows", methods=["GET"])
+@require_auth
+def api_list_shows():
+    band = db.get_user_band(g.user_id)
+    if band:
+        return jsonify(db.list_shows(band_id=band["id"]))
+    return jsonify(db.list_shows(user_id=g.user_id))
+
+
+@app.route("/api/shows", methods=["POST"])
+@require_auth
+def api_create_show():
+    data = request.get_json(force=True) or {}
+    name = (data.get("name") or "").strip()
+    if not name:
+        return jsonify({"error": "name is required"}), 400
+    show_date, err = _parse_show_date(data.get("show_date"))
+    if err:
+        return err
+    band = db.get_user_band(g.user_id)
+    band_id = band["id"] if band else None
+    user_id = None if band_id else g.user_id
+    show = db.create_show(name, show_date=show_date,
+                          venue=(data.get("venue") or None),
+                          notes=(data.get("notes") or None),
+                          band_id=band_id, user_id=user_id)
+    return jsonify(show), 201
+
+
+@app.route("/api/shows/<show_id>", methods=["PATCH"])
+@require_auth
+def api_update_show(show_id):
+    band = db.get_user_band(g.user_id)
+    band_id = band["id"] if band else None
+    user_id = None if band_id else g.user_id
+    data = request.get_json(force=True) or {}
+    fields = {}
+    if "name" in data:
+        name = (data["name"] or "").strip()
+        if not name:
+            return jsonify({"error": "name is required"}), 400
+        fields["name"] = name
+    if "show_date" in data:
+        show_date, err = _parse_show_date(data["show_date"])
+        if err:
+            return err
+        fields["show_date"] = show_date
+    if "venue" in data:
+        fields["venue"] = data["venue"] or None
+    if "notes" in data:
+        fields["notes"] = data["notes"] or None
+    try:
+        if fields:
+            db.update_show(show_id, fields, band_id=band_id, user_id=user_id)
+        if "set_order" in data:
+            db.set_show_set_order(show_id, data["set_order"] or [],
+                                  band_id=band_id, user_id=user_id)
+        # Return the current show state (update_show validates ownership; if only
+        # set_order was sent, fetch via update_show with no fields).
+        show = db.update_show(show_id, {}, band_id=band_id, user_id=user_id)
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 404
+    return jsonify(show)
+
+
+@app.route("/api/shows/<show_id>", methods=["DELETE"])
+@require_auth
+def api_delete_show(show_id):
+    band = db.get_user_band(g.user_id)
+    band_id = band["id"] if band else None
+    user_id = None if band_id else g.user_id
+    try:
+        db.delete_show(show_id, band_id=band_id, user_id=user_id)
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 404
+    return jsonify({"ok": True})
 
 
 # ── Tunings API ────────────────────────────────────────────────────────────────

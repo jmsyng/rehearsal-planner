@@ -95,15 +95,39 @@ CREATE UNIQUE INDEX IF NOT EXISTS songs_user_external_uniq
     ON songs (user_id, external_id)
     WHERE user_id IS NOT NULL AND external_id IS NOT NULL;
 
+-- ── Shows ─────────────────────────────────────────────────────────────────────
+-- A show is one performance night that groups multiple ordered setlists (e.g. a
+-- cover band playing three one-hour sets at a bar). Belongs to a band or a user.
+CREATE TABLE IF NOT EXISTS shows (
+    id         UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+    band_id    UUID        REFERENCES bands(id)            ON DELETE CASCADE,
+    user_id    UUID        REFERENCES neon_auth."user"(id) ON DELETE CASCADE,
+    name       TEXT        NOT NULL,
+    show_date  DATE,
+    venue      TEXT,
+    notes      TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT show_has_one_owner CHECK (
+        (band_id IS NOT NULL AND user_id IS NULL) OR
+        (band_id IS NULL     AND user_id IS NOT NULL)
+    )
+);
+CREATE INDEX IF NOT EXISTS shows_band_idx ON shows (band_id);
+CREATE INDEX IF NOT EXISTS shows_user_idx ON shows (user_id);
+
 -- ── Setlists ──────────────────────────────────────────────────────────────────
 -- A named, ordered list of songs. Belongs to either a band or a user.
--- Multiple setlists per band or user are supported.
+-- Multiple setlists per band or user are supported. A setlist optionally belongs
+-- to one show (show_id), ordered within it by position; both NULL = standalone.
 
 CREATE TABLE IF NOT EXISTS setlists (
     id         UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
     name       TEXT        NOT NULL DEFAULT 'Main Set',
     band_id    UUID        REFERENCES bands(id)             ON DELETE CASCADE,
     user_id    UUID        REFERENCES neon_auth."user"(id)  ON DELETE CASCADE,
+    -- Optional show grouping. Deleting a show demotes its sets to standalone.
+    show_id    UUID        REFERENCES shows(id)             ON DELETE SET NULL,
+    position   INTEGER,    -- order within the show; NULL when standalone
     -- Permanent, unguessable token for the public read-only share link (always present).
     share_token TEXT       UNIQUE NOT NULL DEFAULT gen_random_uuid()::text,
     -- Per-setlist timing settings (copy-on-create from band defaults; source of truth).
@@ -120,6 +144,7 @@ CREATE TABLE IF NOT EXISTS setlists (
         (band_id IS NULL     AND user_id IS NOT NULL)
     )
 );
+CREATE INDEX IF NOT EXISTS setlists_show_idx ON setlists (show_id, position);
 
 -- Ordered songs within a setlist.
 -- plays = how many times this song is performed in this particular set.

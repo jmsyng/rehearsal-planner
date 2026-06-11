@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Run once to initialize the database schema and apply migrations."""
 import os
+import glob
 from dotenv import load_dotenv
 import psycopg2
 
@@ -53,5 +54,27 @@ WHERE s.band_id IS NOT NULL
 with conn.cursor() as cur:
     cur.execute(MIGRATIONS)
 conn.commit()
+
+# ── Pre-stamp schema_migrations ───────────────────────────────────────────────
+# schema.sql already reflects the post-migration target state, so every file in
+# migrations/ is effectively "already applied" on a fresh DB. Record them all so
+# a later `python3 migrate.py` treats this DB as up to date. Without this it would
+# replay 001 (which references long-gone legacy tables) and crash. Idempotent via
+# ON CONFLICT; uses the same basename migrate.py records.
+MIGRATIONS_DIR = os.path.join(os.path.dirname(__file__), "migrations")
+migration_files = sorted(
+    os.path.basename(p) for p in glob.glob(os.path.join(MIGRATIONS_DIR, "*.sql"))
+)
+with conn.cursor() as cur:
+    for filename in migration_files:
+        cur.execute(
+            "INSERT INTO schema_migrations (filename) VALUES (%s) "
+            "ON CONFLICT (filename) DO NOTHING",
+            (filename,),
+        )
+conn.commit()
 conn.close()
-print("Schema initialized and migrations applied successfully.")
+print(
+    f"Schema initialized, migrations applied, and "
+    f"{len(migration_files)} migration file(s) pre-stamped in schema_migrations."
+)
