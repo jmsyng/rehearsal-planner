@@ -789,6 +789,23 @@ Continuation of the 2026-06-10 session — verified and shipped everything.
 
 **UI verified on :5051 (preview MCP):** manager modal opens, show creation works, sets move into shows and appear in optgroups in the switcher, Bug B (reload persistence) confirmed, no console errors. Test data (one show, one duplicate set) cleaned up via the API after verification.
 
+### Session: Panel headers & time bar pinning fix (2026-06-12)
+
+**Bug:** The Song Library header, Set List header, and Total Rehearsal Time bar all scrolled with the page content instead of staying pinned. Users had to scroll down to see the time bar; the headers would scroll out of view.
+
+**Root cause:** The global search bar added in the Reddit-style header redesign session turned the header from one row (~57px) into two rows (~104px). But `.main` still used `height: calc(100vh - 57px)` — so the total page height was ~47px taller than the viewport, causing **page-level scrolling** instead of the intended per-panel scrolling inside `.song-list`. The panel's own flex layout (header pinned → song-list scrolls → time bar pinned) was correct; the container just wasn't height-constrained.
+
+**Fix (`templates/index.html` CSS only, 10-line change):**
+
+- `body`: replaced `min-height: 100vh` with `height: 100vh; overflow: hidden; display: flex; flex-direction: column;` — the body now fills exactly the viewport with no page-level scroll.
+- `.main` (desktop): replaced `height: calc(100vh - 57px)` with `flex: 1; min-height: 0;` — grows to fill whatever space the header doesn't use, independent of header height.
+- `.main` (mobile `@media (max-width: 800px)`): replaced `height: calc(100vh - 57px - 55px)` with `height: auto; flex: 1; min-height: 0;` — same idea; the tab bar and header take natural height, `.main` fills the rest.
+- `#mobile-tab-bar` (mobile): added `flex-shrink: 0;` so the tab bar doesn't get squeezed.
+
+**Lesson:** never hardcode `height: calc(100vh - <N>px)` against a specific header height. Use `body { height: 100vh; display: flex; flex-direction: column; }` + `flex: 1; min-height: 0` on the main container — it adapts automatically when the header changes.
+
+**Deployed:** committed directly to `main` (pure CSS, no migration needed), pushed → Vercel auto-deployed (commit `414bc5e`).
+
 ## Maintenance Pattern for This File
 
 When future sessions do meaningful work in this project, ask Claude:
