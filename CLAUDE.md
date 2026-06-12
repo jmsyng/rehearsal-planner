@@ -777,6 +777,18 @@ Fixed the two reported setlist bugs and added a Set List Management interface (s
 
 **Verified:** migration dry-run + read-only SQL (0 dup groups, keeper 24 songs, backups populated, shows schema present); full API smoke on :5050 (`devtest_signin@example.com`/`DevTest!2345`) — determinism, show CRUD, duplicate, reorder, move, cascade-to-standalone, bad-date 400; UI on preview :5051 — optgroups, manager modal, Bug-B persistence across a simulated reload, stale-id fallback, mobile layout. **Note:** the dev test account is solo (no band) so the app routes it to band-setup; verification drove the solo path directly via `preview_eval` (set `_currentUserId`, call `loadAppData()`). `.claude/launch.json` corrected to bind **5051** (was 5050, which collides with the launchd server).
 
+### Session: Deployment verification & tooling (2026-06-12)
+
+Continuation of the 2026-06-10 session — verified and shipped everything.
+
+**`gh` installed:** `brew install gh` (Homebrew's git editor opened mid-install; `:wq` to accept the merge commit). Already authenticated as `jmsyng` via keyring. Use `gh auth status` to confirm in future sessions.
+
+**Vercel deploy confirmed:** PR #19 (`claude/setlist-shows-management`) was merged to main via the GitHub web UI. Production deployment `dpl_FT57qkEJqY7E7qNaFjAbovPdbHfi` is `READY` (target: production). Vercel project id `prj_9GclRIPlSzABOMogn4Y0reP0E60t`, team `team_50uzQ1PIUjJUImH5JjwGj9Np`.
+
+**Git cleanup needed after this session:** local main had an aborted merge commit (Homebrew's git editor exited with empty message → "aborted"). Resolved by running `git reset --hard origin/main` to sync local main with the already-merged remote.
+
+**UI verified on :5051 (preview MCP):** manager modal opens, show creation works, sets move into shows and appear in optgroups in the switcher, Bug B (reload persistence) confirmed, no console errors. Test data (one show, one duplicate set) cleaned up via the API after verification.
+
 ## Maintenance Pattern for This File
 
 When future sessions do meaningful work in this project, ask Claude:
