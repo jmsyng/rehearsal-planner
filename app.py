@@ -371,7 +371,7 @@ def api_get_setlist_share():
     return jsonify({"token": db.get_setlist_share_token(sid)})
 
 
-EXPORT_COLUMNS = ["Position", "Song", "Artist", "Duration", "Tuning", "Plays"]
+EXPORT_COLUMNS = ["Position", "Song", "Artist", "Duration", "Tuning", "Key", "Plays"]
 
 
 def _format_duration_for_export(duration_raw, duration_sec):
@@ -385,7 +385,7 @@ def _format_duration_for_export(duration_raw, duration_sec):
 def _export_rows(rows):
     return [[i, r["name"], r["artist"],
              _format_duration_for_export(r["duration_raw"], r["duration_sec"]),
-             r["our_tuning"] or r["tuning"] or "", r["plays"]]
+             r["our_tuning"] or r["tuning"] or "", r["key_standard"] or "", r["plays"]]
             for i, r in enumerate(rows, start=1)]
 
 
@@ -540,17 +540,24 @@ def api_delete_show(show_id):
 @app.route("/api/tunings", methods=["GET"])
 @require_auth
 def api_get_tunings():
-    return jsonify(db.get_tunings(g.user_id))
+    return jsonify({
+        "tunings": db.get_tunings(g.user_id),
+        "offsets": db.get_tuning_offsets(g.user_id),
+    })
 
 
 @app.route("/api/tunings", methods=["POST"])
 @require_auth
 def api_add_tuning():
-    data = request.get_json(force=True)
-    tuning = (data or {}).get("tuning", "").strip()
+    data = request.get_json(force=True) or {}
+    tuning = (data.get("tuning") or "").strip()
     if not tuning:
         return jsonify({"error": "tuning value required"}), 400
-    db.add_tuning(g.user_id, tuning)
+    try:
+        offset = int(data.get("semitone_offset", 0))
+    except (TypeError, ValueError):
+        offset = 0
+    db.add_tuning(g.user_id, tuning, offset)
     return jsonify({"ok": True})
 
 

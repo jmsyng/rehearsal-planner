@@ -7,6 +7,58 @@ from psycopg2.extras import RealDictCursor
 
 DEFAULT_TUNINGS = ['E standard', 'Eb', 'Drop D', 'Drop C#']
 
+# Seed semitone offsets for the 4 default tunings, relative to standard
+# (E standard = 0). "Drop" tunings only drop the low string for extended-range
+# riffs — they don't transpose the key the band plays in, so Drop D shares
+# E standard's offset and Drop C# shares Eb's (each a half-step lower than the
+# other pair). Users can override via user_tunings.semitone_offset (My Settings).
+DEFAULT_TUNING_SEMITONES = {'E standard': 0, 'Eb': -1, 'Drop D': 0, 'Drop C#': -1}
+
+# Standard key notation -> Camelot Wheel code. Static lookup, derived at read
+# time in _row_to_song — never stored, so it can't drift from key_standard.
+CAMELOT_MAP = {
+    "C major": "8B", "A minor": "8A",
+    "G major": "9B", "E minor": "9A",
+    "D major": "10B", "B minor": "10A",
+    "A major": "11B", "F# minor": "11A",
+    "E major": "12B", "C# minor": "12A",
+    "B major": "1B", "G# minor": "1A",
+    "F# major": "2B", "D# minor": "2A",
+    "Db major": "3B", "Bb minor": "3A",
+    "Ab major": "4B", "F minor": "4A",
+    "Eb major": "5B", "C minor": "5A",
+    "Bb major": "6B", "G minor": "6A",
+    "F major": "7B", "D minor": "7A",
+}
+MUSICAL_KEYS = list(CAMELOT_MAP.keys())
+
+# Chromatic note -> index (0=C), shared by major/minor; enharmonic spellings
+# both map to the same index. Used to transpose a key by a semitone delta.
+_NOTE_TO_INDEX = {
+    'C': 0, 'Db': 1, 'C#': 1, 'D': 2, 'Eb': 3, 'D#': 3, 'E': 4, 'F': 5,
+    'F#': 6, 'Gb': 6, 'G': 7, 'Ab': 8, 'G#': 8, 'A': 9, 'Bb': 10, 'A#': 10, 'B': 11,
+}
+# index -> canonical spelling used in MUSICAL_KEYS, per mode.
+_INDEX_TO_MAJOR = {0: 'C', 1: 'Db', 2: 'D', 3: 'Eb', 4: 'E', 5: 'F',
+                    6: 'F#', 7: 'G', 8: 'Ab', 9: 'A', 10: 'Bb', 11: 'B'}
+_INDEX_TO_MINOR = {0: 'C', 1: 'C#', 2: 'D', 3: 'D#', 4: 'E', 5: 'F',
+                    6: 'F#', 7: 'G', 8: 'G#', 9: 'A', 10: 'Bb', 11: 'B'}
+
+
+def transpose_key(key_standard, semitone_delta):
+    """Shift a 'Note mode' key (e.g. 'A minor') by semitone_delta, wrapping
+    within the octave. Returns a value guaranteed to be a MUSICAL_KEYS entry.
+    None/unrecognized input or a zero delta returns the input unchanged."""
+    if not key_standard or not semitone_delta:
+        return key_standard
+    try:
+        note, mode = key_standard.rsplit(' ', 1)
+        idx = (_NOTE_TO_INDEX[note] + semitone_delta) % 12
+        table = _INDEX_TO_MAJOR if mode == 'major' else _INDEX_TO_MINOR
+        return f"{table[idx]} {mode}"
+    except (KeyError, ValueError):
+        return key_standard
+
 # Default timing settings (matches migration 004 / schema.sql defaults).
 # Used to seed solo-user setlists and as the fallback in get_setlist_full.
 SOLO_DEFAULT_SETTINGS = {
@@ -71,6 +123,7 @@ def _song_fields(song: dict) -> dict:
         "tuning":          extra.get("Tuning"),
         "recorded_tuning": extra.get("RecordedTuning"),
         "our_tuning":      extra.get("OurTuning"),
+        "key_standard":    extra.get("Key"),
         "album_art":       extra.get("albumArt"),
         "spotify_url":     extra.get("spotifyUrl"),
         "youtube_link":    extra.get("YouTubeLink"),
@@ -91,6 +144,8 @@ def _row_to_song(row) -> dict:
             "Tuning": row["tuning"],
             "RecordedTuning": row["recorded_tuning"],
             "OurTuning": row["our_tuning"],
+            "Key": row.get("key_standard"),
+            "CamelotKey": CAMELOT_MAP.get(row.get("key_standard")),
             "albumArt": row["album_art"],
             "spotifyUrl": row["spotify_url"],
             "YouTubeLink": row["youtube_link"],
@@ -168,6 +223,7 @@ def upsert_song(user_id: str, song: dict, band_id: str = None) -> dict:
                       name=%(name)s, duration_raw=%(duration_raw)s, duration_sec=%(duration_sec)s,
                       artist=%(artist)s, status=%(status)s, tuning=%(tuning)s,
                       recorded_tuning=%(recorded_tuning)s, our_tuning=%(our_tuning)s,
+                      key_standard=%(key_standard)s,
                       album_art=%(album_art)s, spotify_url=%(spotify_url)s, youtube_link=%(youtube_link)s
                     WHERE id=%(id)s AND ({update_pred})
                     RETURNING *
@@ -189,12 +245,12 @@ def upsert_song(user_id: str, song: dict, band_id: str = None) -> dict:
                     INSERT INTO songs
                       (external_id, band_id, user_id, added_by, name, duration_raw,
                        duration_sec, artist, status, tuning, recorded_tuning, our_tuning,
-                       album_art, spotify_url, youtube_link)
+                       key_standard, album_art, spotify_url, youtube_link)
                     VALUES
                       (%(external_id)s, %(band_id)s, %(user_id)s, %(added_by)s, %(name)s,
                        %(duration_raw)s, %(duration_sec)s, %(artist)s, %(status)s, %(tuning)s,
-                       %(recorded_tuning)s, %(our_tuning)s, %(album_art)s, %(spotify_url)s,
-                       %(youtube_link)s)
+                       %(recorded_tuning)s, %(our_tuning)s, %(key_standard)s, %(album_art)s,
+                       %(spotify_url)s, %(youtube_link)s)
                     RETURNING *
                 """, params)
             else:
@@ -203,12 +259,12 @@ def upsert_song(user_id: str, song: dict, band_id: str = None) -> dict:
                     INSERT INTO songs
                       (external_id, band_id, user_id, added_by, name, duration_raw,
                        duration_sec, artist, status, tuning, recorded_tuning, our_tuning,
-                       album_art, spotify_url, youtube_link)
+                       key_standard, album_art, spotify_url, youtube_link)
                     VALUES
                       (%(external_id)s, %(band_id)s, %(user_id)s, %(added_by)s, %(name)s,
                        %(duration_raw)s, %(duration_sec)s, %(artist)s, %(status)s, %(tuning)s,
-                       %(recorded_tuning)s, %(our_tuning)s, %(album_art)s, %(spotify_url)s,
-                       %(youtube_link)s)
+                       %(recorded_tuning)s, %(our_tuning)s, %(key_standard)s, %(album_art)s,
+                       %(spotify_url)s, %(youtube_link)s)
                     ON CONFLICT ({conflict_col}, external_id)
                       WHERE {conflict_col} IS NOT NULL AND external_id IS NOT NULL
                     DO UPDATE SET
@@ -216,6 +272,7 @@ def upsert_song(user_id: str, song: dict, band_id: str = None) -> dict:
                       duration_sec=EXCLUDED.duration_sec, artist=EXCLUDED.artist,
                       status=EXCLUDED.status, tuning=EXCLUDED.tuning,
                       recorded_tuning=EXCLUDED.recorded_tuning, our_tuning=EXCLUDED.our_tuning,
+                      key_standard=EXCLUDED.key_standard,
                       album_art=EXCLUDED.album_art, spotify_url=EXCLUDED.spotify_url,
                       youtube_link=EXCLUDED.youtube_link
                     RETURNING *
@@ -610,8 +667,8 @@ def get_shared_setlist(token: str):
             # Ordered setlist songs — display fields only, plays from setlist_songs.
             cur.execute("""
                 SELECT s.id, s.name, s.artist, s.duration_raw, s.duration_sec,
-                       s.album_art, s.tuning, s.recorded_tuning, s.our_tuning, s.status,
-                       s.spotify_url, s.youtube_link, ss.plays
+                       s.album_art, s.tuning, s.recorded_tuning, s.our_tuning, s.key_standard,
+                       s.status, s.spotify_url, s.youtube_link, ss.plays
                 FROM setlist_songs ss
                 JOIN songs s ON s.id = ss.song_id
                 WHERE ss.setlist_id = %s
@@ -637,7 +694,7 @@ def get_setlist_export_rows(setlist_id: str) -> list:
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
             cur.execute("""
                 SELECT s.name, s.artist, s.duration_raw, s.duration_sec,
-                       s.tuning, s.our_tuning, ss.plays
+                       s.tuning, s.our_tuning, s.key_standard, ss.plays
                 FROM setlist_songs ss
                 JOIN songs s ON s.id = ss.song_id
                 WHERE ss.setlist_id = %s
@@ -1025,15 +1082,37 @@ def get_tunings(user_id: str) -> list:
         put_conn(conn)
 
 
-def add_tuning(user_id: str, tuning: str) -> None:
-    if tuning in DEFAULT_TUNINGS:
-        return
+def get_tuning_offsets(user_id: str) -> dict:
+    """Semitone offset per tuning (default + custom), relative to standard.
+    Defaults are seeded from DEFAULT_TUNING_SEMITONES, then overridden by any
+    per-user row (covers both custom tunings and user-edited default offsets)."""
+    offsets = dict(DEFAULT_TUNING_SEMITONES)
     conn = get_conn()
     try:
         with conn.cursor() as cur:
             cur.execute(
-                "INSERT INTO user_tunings (user_id, tuning) VALUES (%s, %s) ON CONFLICT DO NOTHING",
-                (user_id, tuning)
+                "SELECT tuning, semitone_offset FROM user_tunings WHERE user_id = %s",
+                (user_id,)
+            )
+            for tuning, offset in cur.fetchall():
+                offsets[tuning] = offset
+        return offsets
+    finally:
+        put_conn(conn)
+
+
+def add_tuning(user_id: str, tuning: str, semitone_offset: int = 0) -> None:
+    """Add a custom tuning, or set/override the semitone offset for an
+    existing tuning (default or custom) — upsert either way."""
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """INSERT INTO user_tunings (user_id, tuning, semitone_offset)
+                   VALUES (%s, %s, %s)
+                   ON CONFLICT (user_id, tuning) DO UPDATE
+                     SET semitone_offset = EXCLUDED.semitone_offset""",
+                (user_id, tuning, semitone_offset)
             )
         conn.commit()
     except Exception:

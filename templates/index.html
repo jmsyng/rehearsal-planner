@@ -1093,6 +1093,17 @@
       white-space: nowrap;
     }
 
+    .key-badge {
+      flex-shrink: 0;
+      font-size: 10px;
+      font-weight: 600;
+      padding: 2px 6px;
+      border-radius: 10px;
+      background: var(--border);
+      color: var(--text-dim);
+      white-space: nowrap;
+    }
+
     .song-count-badge {
       font-size: 11px;
       color: var(--text-dim);
@@ -2402,6 +2413,71 @@ let setListSearchText = '';  // tracks search text in set list
 let expandedSongId = null;  // tracks which song card is currently expanded
 let allTuningValues = ['E standard', 'Eb', 'Drop D', 'Drop C#'];  // available tuning values across app
 
+// Standard key notation -> Camelot Wheel code. Mirrors db.py CAMELOT_MAP — keep in sync.
+const CAMELOT_MAP = {
+  'C major': '8B', 'A minor': '8A',
+  'G major': '9B', 'E minor': '9A',
+  'D major': '10B', 'B minor': '10A',
+  'A major': '11B', 'F# minor': '11A',
+  'E major': '12B', 'C# minor': '12A',
+  'B major': '1B', 'G# minor': '1A',
+  'F# major': '2B', 'D# minor': '2A',
+  'Db major': '3B', 'Bb minor': '3A',
+  'Ab major': '4B', 'F minor': '4A',
+  'Eb major': '5B', 'C minor': '5A',
+  'Bb major': '6B', 'G minor': '6A',
+  'F major': '7B', 'D minor': '7A',
+};
+const MUSICAL_KEYS = Object.keys(CAMELOT_MAP);
+
+// Seed semitone offsets for the 4 default tunings. Mirrors db.py
+// DEFAULT_TUNING_SEMITONES — keep in sync. "Drop" tunings only drop the low
+// string for extended-range riffs — they don't transpose the key, so Drop D
+// shares E standard's offset and Drop C# shares Eb's. Overridden per-tuning
+// by tuningOffsets (loaded from /api/tunings) once available.
+const DEFAULT_TUNING_SEMITONES = { 'E standard': 0, 'Eb': -1, 'Drop D': 0, 'Drop C#': -1 };
+let tuningOffsets = {};  // {tuningName: semitoneOffset}, loaded in loadAppData
+
+function getTuningOffset(tuningName) {
+  if (!tuningName) return 0;
+  if (tuningName in tuningOffsets) return tuningOffsets[tuningName];
+  return DEFAULT_TUNING_SEMITONES[tuningName] ?? 0;
+}
+
+// Chromatic note -> index (0=C); mirrors db.py _NOTE_TO_INDEX — keep in sync.
+const NOTE_TO_INDEX = {
+  'C': 0, 'Db': 1, 'C#': 1, 'D': 2, 'Eb': 3, 'D#': 3, 'E': 4, 'F': 5,
+  'F#': 6, 'Gb': 6, 'G': 7, 'Ab': 8, 'G#': 8, 'A': 9, 'Bb': 10, 'A#': 10, 'B': 11,
+};
+const INDEX_TO_MAJOR = ['C', 'Db', 'D', 'Eb', 'E', 'F', 'F#', 'G', 'Ab', 'A', 'Bb', 'B'];
+const INDEX_TO_MINOR = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'Bb', 'B'];
+
+// Mirrors db.py transpose_key — keep in sync.
+function transposeKey(keyStandard, semitoneDelta) {
+  if (!keyStandard || !semitoneDelta) return keyStandard;
+  const spaceIdx = keyStandard.lastIndexOf(' ');
+  const note = keyStandard.slice(0, spaceIdx);
+  const mode = keyStandard.slice(spaceIdx + 1);
+  if (!(note in NOTE_TO_INDEX)) return keyStandard;
+  const idx = ((NOTE_TO_INDEX[note] + semitoneDelta) % 12 + 12) % 12;
+  const table = mode === 'major' ? INDEX_TO_MAJOR : INDEX_TO_MINOR;
+  return `${table[idx]} ${mode}`;
+}
+
+// The effective key the band actually plays a song in: the recorded
+// (original) key transposed by the offset between Tuning on Record and Our
+// Tuning. Falls back to the recorded key unchanged if either tuning is
+// unset or unrecognized.
+function computeOurKey(song) {
+  const recordedKey = song.extra?.Key;
+  if (!recordedKey) return null;
+  const recTuning = song.extra?.RecordedTuning;
+  const ourTuning = song.extra?.OurTuning;
+  if (!recTuning || !ourTuning || recTuning === ourTuning) return recordedKey;
+  const delta = getTuningOffset(ourTuning) - getTuningOffset(recTuning);
+  return transposeKey(recordedKey, delta);
+}
+
 // Library toolbar filters + set-list grouping
 let libraryTuningFilter = '';   // '' = all tunings
 let libraryStatusFilter = '';   // '' = all statuses
@@ -2899,7 +2975,9 @@ async function loadAppData() {
     libraryData     = await songsRes.json();
     _setlists       = setlistsRes.ok ? await setlistsRes.json() : [];
     _shows          = showsRes.ok ? await showsRes.json() : [];
-    allTuningValues = await tuningsRes.json();
+    const tuningsData = await tuningsRes.json();
+    allTuningValues = tuningsData.tunings || [];
+    tuningOffsets   = tuningsData.offsets || {};
     const csEl = document.getElementById('custom-song-tuning');
     if (csEl) populateTuningSelect(csEl, '');
 
@@ -3125,6 +3203,16 @@ function makeSongCard(song, inSetList) {
     tuningBadge.className = 'tuning-badge';
     tuningBadge.textContent = tuning;
     nameEl.appendChild(tuningBadge);
+  }
+  // Shows the effective ("Our") key — the recorded key transposed to the
+  // band's actual tuning, not necessarily what the user typed in.
+  const ourKeyVal = computeOurKey(song);
+  if (ourKeyVal) {
+    const keyBadge = document.createElement('span');
+    keyBadge.className = 'key-badge';
+    const camelot = CAMELOT_MAP[ourKeyVal];
+    keyBadge.textContent = camelot ? `${camelot} · ${ourKeyVal}` : ourKeyVal;
+    nameEl.appendChild(keyBadge);
   }
 
   // Line 3: Duration + optional status badge
@@ -3426,6 +3514,58 @@ function makeSongCard(song, inSetList) {
       return field;
     }
 
+    // Helper function to create the musical-key dropdown (closed 24-value domain, no add-new).
+    function createKeyDropdown(value, onChangeCallback) {
+      const field = document.createElement('div');
+      field.className = 'expanded-field expanded-field-inline';
+
+      const label = document.createElement('label');
+      label.textContent = 'Original Key';
+
+      const select = document.createElement('select');
+      select.style.cssText = 'padding: 3px 6px; border-radius: 4px; border: 1px solid var(--border); background: var(--surface); color: var(--text); font-size: 12px; flex: 1;';
+
+      const empty = document.createElement('option');
+      empty.value = '';
+      empty.textContent = '— Select —';
+      select.appendChild(empty);
+      MUSICAL_KEYS.forEach(k => {
+        const opt = document.createElement('option');
+        opt.value = k;
+        opt.textContent = `${CAMELOT_MAP[k]} · ${k}`;
+        select.appendChild(opt);
+      });
+      if (value) select.value = value;
+
+      select.addEventListener('change', e => onChangeCallback(e.target.value));
+
+      field.append(label, select);
+      return field;
+    }
+
+    // Read-only display of the effective key — the Original Key transposed
+    // by the delta between Tuning on Record and Our Tuning. Recalculated
+    // whenever any of the three fields below changes.
+    const ourKeyDisplay = document.createElement('p');
+    ourKeyDisplay.style.cssText = 'font-size:11px; color:var(--text-dim); margin:0;';
+    function refreshOurKeyDisplay() {
+      const ourKeyVal = computeOurKey(song);
+      if (!ourKeyVal) {
+        ourKeyDisplay.textContent = '';
+        return;
+      }
+      const camelot = CAMELOT_MAP[ourKeyVal];
+      const display = camelot ? `${camelot} · ${ourKeyVal}` : ourKeyVal;
+      const transposed = ourKeyVal !== song.extra?.Key;
+      ourKeyDisplay.textContent = transposed ? `Our Key: ${display} (transposed)` : `Our Key: ${display}`;
+    }
+
+    const keyField = createKeyDropdown(song.extra?.Key || '', (value) => {
+      song.extra.Key = value;
+      song.extra.CamelotKey = CAMELOT_MAP[value] || null;
+      refreshOurKeyDisplay();
+    });
+
     const recordedField = createTuningDropdown('Tuning on Record', song.extra?.RecordedTuning || '', (value) => {
       song.extra.RecordedTuning = value;
       // Update Our Tuning field to show alert if different
@@ -3438,6 +3578,7 @@ function makeSongCard(song, inSetList) {
           ourTuningLabel.innerHTML = 'Our Tuning';
         }
       }
+      refreshOurKeyDisplay();
     });
 
     const ourField = createTuningDropdown('Our Tuning', song.extra?.OurTuning || '', (value) => {
@@ -3452,7 +3593,10 @@ function makeSongCard(song, inSetList) {
           ourTuningLabel.innerHTML = 'Our Tuning';
         }
       }
+      refreshOurKeyDisplay();
     }, song.extra?.RecordedTuning);
+
+    refreshOurKeyDisplay();
 
     // Status field — secondary editor (the collapsed-card chip is the primary path).
     // Persists immediately on change, same as the popover.
@@ -3478,7 +3622,7 @@ function makeSongCard(song, inSetList) {
       expandedSection.appendChild(statusField);
     }
 
-    expandedSection.append(recordedField, ourField);
+    expandedSection.append(recordedField, ourField, keyField, ourKeyDisplay);
 
     const actions = document.createElement('div');
     actions.className = 'expanded-actions';
@@ -3493,6 +3637,8 @@ function makeSongCard(song, inSetList) {
       if (live && live !== song) {
         live.extra.OurTuning = song.extra.OurTuning;
         live.extra.RecordedTuning = song.extra.RecordedTuning;
+        live.extra.Key = song.extra.Key;
+        live.extra.CamelotKey = song.extra.CamelotKey;
         if (song.extra.Status !== undefined) live.extra.Status = song.extra.Status;
       }
       apiUpdateSong(song);
@@ -5476,7 +5622,17 @@ function renderSettingsTunings() {
   (allTuningValues || []).forEach(t => {
     const pill = document.createElement('span');
     pill.style.cssText = 'font-size:12px; padding:5px 12px; border-radius:16px; border:1px solid var(--border); background:var(--bg); color:var(--text); display:inline-flex; align-items:center; gap:6px;';
-    pill.textContent = t;
+    const label = document.createElement('span');
+    const offset = getTuningOffset(t);
+    label.textContent = `${t} (${offset > 0 ? '+' : ''}${offset})`;
+    label.title = 'Semitones relative to standard — used to transpose song keys';
+    pill.appendChild(label);
+    const editBtn = document.createElement('button');
+    editBtn.textContent = '✎';
+    editBtn.title = 'Edit semitone offset';
+    editBtn.style.cssText = 'background:none; border:none; cursor:pointer; color:var(--text-dim); font-size:12px; line-height:1; padding:0; margin:0;';
+    editBtn.onclick = () => editTuningOffset(t);
+    pill.appendChild(editBtn);
     if (!DEFAULT_TUNINGS.includes(t)) {
       const btn = document.createElement('button');
       btn.textContent = '×';
@@ -5487,6 +5643,26 @@ function renderSettingsTunings() {
     }
     wrap.appendChild(pill);
   });
+}
+async function editTuningOffset(tuning) {
+  const current = getTuningOffset(tuning);
+  const input = prompt(`Semitone offset for "${tuning}" relative to standard (e.g. -2 for a whole step down):`, current);
+  if (input === null) return;
+  const offset = parseInt(input, 10);
+  if (Number.isNaN(offset)) { showToast('Enter a whole number'); return; }
+  try {
+    const res = await apiFetch('/api/tunings', {
+      method: 'POST',
+      body: JSON.stringify({ tuning, semitone_offset: offset }),
+    });
+    if (!res.ok) throw new Error('Failed');
+    tuningOffsets[tuning] = offset;
+    renderSettingsTunings();
+    renderLibrary();
+    showToast('✓ Offset saved');
+  } catch (err) {
+    showToast('Failed to save offset');
+  }
 }
 async function deleteTuning(tuning) {
   try {
@@ -5506,10 +5682,14 @@ async function addTuningFromSettings() {
   const tuning = input.value.trim();
   if (!tuning) return;
   if (allTuningValues.includes(tuning)) { input.value = ''; return; }
+  const offsetInput = prompt(`Semitone offset for "${tuning}" relative to standard (e.g. -2 for a whole step down). Needed to transpose song keys correctly:`, '0');
+  if (offsetInput === null) return;
+  const offset = parseInt(offsetInput, 10) || 0;
   try {
-    const res = await apiFetch('/api/tunings', { method: 'POST', body: JSON.stringify({ tuning }) });
+    const res = await apiFetch('/api/tunings', { method: 'POST', body: JSON.stringify({ tuning, semitone_offset: offset }) });
     if (!res.ok) throw new Error('Failed');
     allTuningValues.push(tuning);
+    tuningOffsets[tuning] = offset;
     input.value = '';
     renderSettingsTunings();
     const csEl2 = document.getElementById('custom-song-tuning');

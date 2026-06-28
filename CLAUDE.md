@@ -827,6 +827,44 @@ height: 100dvh;  /* dynamic viewport height — shrinks when browser UI is shown
 
 **Deployed:** committed directly to `main` (pure CSS, no migration needed), pushed → Vercel auto-deployed (commit `52c0e21`).
 
+### Session: Setlist Export to CSV/XLSX (2026-06-28)
+
+Added a way to get a setlist out of the app as a file. Plan file: `~/.claude/plans/gentle-splashing-storm.md`.
+
+**Scope decision:** "Export to Google Sheets" was requested but implemented as plain CSV (Sheets opens CSV natively via File > Import) rather than a real Google OAuth integration — the latter would need a new Google Cloud OAuth client, consent screen, and token storage, which wasn't worth it for this. So there are exactly two real formats: **CSV** and **XLSX**.
+
+**`db.py`:** new `get_setlist_export_rows(setlist_id)` — same `setlist_songs JOIN songs` pattern already used by `get_shared_setlist`, trimmed to the columns export needs (name, artist, duration_raw/duration_sec, tuning, our_tuning, plays). Returns raw rows, no formatting — formatting is a presentation concern, kept in `app.py`.
+
+**`app.py`:** new `GET /api/setlist/export?format=csv|xlsx` (`@require_auth`), reusing `_resolve_setlist` exactly like `/api/setlist` and `/api/setlist/share` already do (so ownership/default-setlist resolution is identical). CSV via stdlib `csv` + `io.StringIO`; XLSX via `openpyxl` (added to `requirements.txt`) + `io.BytesIO` — both built in-memory since Vercel's filesystem isn't persistent. Columns: Position, Song, Artist, Duration, Tuning, Plays. A setlist with zero songs still produces a valid header-only file (no special-casing needed).
+
+**`templates/index.html`:** added an "⬇ Export set list" button to the Set List toolbar (next to the existing `⏱` timing-settings button) that opens a small dropdown — "📄 Download CSV" / "📊 Download XLSX" — reusing the existing `.hdr-menu`/`toggleX`/`closeAllMenus` pattern already built for the band/user menus (rather than adding a 7th bare icon to an already-crowded toolbar). `downloadSetlistExport(format)` calls the export endpoint via `apiFetch` (so the JWT goes in the `Authorization` header, not the URL) and triggers a blob download.
+
+**Bug found and fixed (`db.py`, `_default_setlist_id`):** `RELEASE SAVEPOINT _create_setlist` was executing *before* `cur.fetchone()` on the just-inserted setlist row. Each `cur.execute()` call discards the previous statement's result set, so the `fetchone()` always raised `psycopg2.ProgrammingError: no results to fetch`. This wasn't conditional on the `UndefinedColumn` fallback path — it broke unconditionally, for **any** brand-new band or solo account on first load (i.e. `GET/POST /api/setlist` 500'd the first time a setlist needed to be auto-created, which also broke the new export route via `_resolve_setlist`). Fixed by moving `cur.fetchone()` before the `RELEASE SAVEPOINT` call. Found while verifying the export feature against a freshly created test band — not previously caught because most testing in past sessions reused accounts that already had a setlist.
+
+**Verification:** local dev server on :5051 (Claude Preview MCP). Created a throwaway band, added the seeded test song to its set list (confirmed `POST /api/setlist` now returns 200, not 500), then exported both formats — verified via direct `apiFetch` calls (correct CSV rows, correct XLSX mimetype/filename/content via `openpyxl.load_workbook`) and via the real UI click path (dropdown opens, `GET /api/setlist/export?...&setlist_id=...` returns 200, no console errors). Also curl-tested `format=pdf` (400) and a bogus `setlist_id` (404 via `_resolve_setlist`'s ownership check). **Note:** `preview_click` didn't fire the new export button's handler (synthetic-event quirk already documented elsewhere in this file for a different dynamically-rendered button) — verified via direct `.click()` / function calls instead, which did work. Cleaned up the test band via `DELETE /api/band` after verification.
+
+**Deployed:** two commits to `main` — `e00fbf0` (export feature + the `_default_setlist_id` fix) and `e53edf0` (this file's prior session's docs, which had been left uncommitted) — pushed → Vercel auto-deployed.
+
+### Session: Musical Key (Camelot + transposition) (2026-06-28)
+
+Added per-song musical key, displayed as `Camelot · standard notation`, with a deliberate scope decision and a transposition model.
+
+**Sourcing decision:** considered Spotify Audio Features (the obvious source, since Spotify track IDs are already stored) but it's gated off for any app created after Nov 2024 — confirmed 403 for new apps. GetSongBPM/Tunebat/AcousticBrainz were all rejected as unreliable (no SLA, unofficial scraping, or dead project). **Landed on manual-only entry** — same trust model as the existing `our_tuning` field. No external API calls for key data, by design.
+
+**Schema:** `migrations/009_song_key.sql` adds `songs.key_standard TEXT` (the user-entered *original/recorded* key). Camelot code is **never stored** — `CAMELOT_MAP` (a static 24-entry dict in both `db.py` and `templates/index.html`, kept in sync by comment convention) derives it at read/render time so it can't drift from `key_standard`.
+
+**The transposition model (the interesting part):** a song's recorded key isn't necessarily what the band plays it in, if "Tuning on Record" and "Our Tuning" differ. `migrations/010_tuning_semitone_offset.sql` adds `user_tunings.semitone_offset INTEGER DEFAULT 0` — every tuning (default or custom) has a semitone offset relative to standard. `db.transpose_key(key, delta)` / its JS mirror `transposeKey()` shift a key by chromatic note-index arithmetic, always landing on one of the 24 canonical `MUSICAL_KEYS` spellings.
+
+- **Getting the default offsets right took a correction.** First pass treated all 4 defaults as a uniform whole-instrument shift (`E standard=0, Eb=-1, Drop D=-2, Drop C#=-3`) — wrong. Drop tunings only drop the low string for extended-range riffs; they don't transpose the key. Corrected to `E standard=0, Eb=-1, Drop D=0, Drop C#=-1` — Drop D pairs with E standard (same key), Drop C# pairs with Eb (same key, half-step down from the first pair). **Lesson: don't assume a tuning name implies a uniform pitch shift — "Drop X" tunings are voicing changes on one string, not full transpositions, unless the user says otherwise.**
+- **Offsets are per-user and live in `user_tunings`**, seeded by `DEFAULT_TUNING_SEMITONES` as a fallback (not a DB row) until a user overrides one. `add_tuning()` now upserts an offset for *any* tuning name including defaults — previously it no-op'd for defaults entirely.
+- `GET /api/tunings` response shape changed: `{tunings: [...], offsets: {...}}` (was a bare array). Both `loadAppData` and the dev-mode bootstrap were updated; check for other bare-array assumptions if `/api/tunings` is touched again.
+
+**UI:** collapsed card shows the **computed "Our Key"** (transposed), not the raw entered value — mirrors what already happens with `OurTuning`/`Tuning` precedence. Expanded card's dropdown is labeled "Original Key" (the only editable key field) plus a read-only `Our Key: 6A · G minor (transposed)` line that recalculates live as any of Original Key / Tuning on Record / Our Tuning change. My Settings → tunings pills show `Drop D (0)` etc. with a ✎ edit affordance (works on defaults too, not just custom tunings) — `editTuningOffset()`.
+
+**Verification:** curl round-trips against the live Neon DB confirmed `Key→CamelotKey` derivation; Claude Preview (:5051, injected mock song data, devtest_signin account) confirmed the full transposition chain end-to-end (E standard→Drop D = no change; E standard→Drop C#/Eb = same transposed key for both, as expected) and the My Settings offset editor, no console errors.
+
+**State at session end:** migrations 009 and 010 already applied via `migrate.py` against the connected Neon DB (same `DATABASE_URL` Vercel uses) — no separate prod migration step needed before this deploy. Code committed and pushed in this session.
+
 ## Maintenance Pattern for This File
 
 When future sessions do meaningful work in this project, ask Claude:

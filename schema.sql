@@ -70,6 +70,7 @@ CREATE TABLE IF NOT EXISTS songs (
     tuning          TEXT,
     recorded_tuning TEXT,
     our_tuning      TEXT,
+    key_standard    TEXT,
     album_art       TEXT,
     spotify_url     TEXT,
     youtube_link    TEXT,
@@ -195,8 +196,11 @@ CREATE TABLE IF NOT EXISTS notifications (
 -- ── User-added tunings ────────────────────────────────────────────────────────
 
 CREATE TABLE IF NOT EXISTS user_tunings (
-    user_id UUID NOT NULL REFERENCES neon_auth."user"(id) ON DELETE CASCADE,
-    tuning  TEXT NOT NULL,
+    user_id         UUID NOT NULL REFERENCES neon_auth."user"(id) ON DELETE CASCADE,
+    tuning          TEXT NOT NULL,
+    -- Semitone offset relative to standard (E standard = 0). Powers Key
+    -- transposition between a song's recorded tuning and the band's tuning.
+    semitone_offset INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (user_id, tuning)
 );
 
