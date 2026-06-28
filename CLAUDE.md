@@ -806,6 +806,27 @@ Continuation of the 2026-06-10 session — verified and shipped everything.
 
 **Deployed:** committed directly to `main` (pure CSS, no migration needed), pushed → Vercel auto-deployed (commit `414bc5e`).
 
+### Session: Firefox Mobile browser toolbar overlap fix (2026-06-12)
+
+**Bug:** On Firefox Mobile, the browser's bottom navigation bar covered the lower half of the Total Rehearsal Time pane. Users could temporarily reveal it by over-scrolling to the bottom, which caused the browser toolbar to retract — confirming the content was there but hidden behind the chrome.
+
+**Root cause:** `body { height: 100vh }` uses the **large viewport height** — the full screen height including the area behind the browser's own UI. When Firefox Mobile's bottom toolbar is visible, it physically overlaps the bottom of the body. `vh` doesn't shrink to account for it.
+
+**Fix (`templates/index.html`, 1-line addition):**
+
+```css
+height: 100vh;   /* fallback for older browsers */
+height: 100dvh;  /* dynamic viewport height — shrinks when browser UI is shown */
+```
+
+`dvh` (dynamic viewport height) adjusts reactively as the browser toolbar shows and hides, so the body is always constrained to the truly visible area. The `100vh` line stays as a fallback (CSS parsers keep the last valid value; `dvh`-aware browsers override it). No layout side-effects since the body has `overflow: hidden` and all scrolling happens inside the panels.
+
+**Browser support for `dvh`:** Firefox 101+ (Jun 2022), Chrome 108+ (Nov 2022), Safari 15.4+ (Mar 2022) — all current mobile versions.
+
+**Lesson:** never use `100vh` as the sole height constraint on a body that contains fixed/sticky bottom elements. Use `100dvh` (with `100vh` fallback) so mobile browser chrome doesn't overlap your content.
+
+**Deployed:** committed directly to `main` (pure CSS, no migration needed), pushed → Vercel auto-deployed (commit `52c0e21`).
+
 ## Maintenance Pattern for This File
 
 When future sessions do meaningful work in this project, ask Claude:
