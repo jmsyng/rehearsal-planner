@@ -365,8 +365,8 @@ def _default_setlist_id(cur, *, user_id=None, band_id=None, create=False):
             cur.execute("INSERT INTO setlists (name, band_id) VALUES ('Main Set', %s) RETURNING id", (band_id,))
         else:
             cur.execute("INSERT INTO setlists (name, user_id) VALUES ('Main Set', %s) RETURNING id", (user_id,))
-    cur.execute("RELEASE SAVEPOINT _create_setlist")
     new_row = cur.fetchone()
+    cur.execute("RELEASE SAVEPOINT _create_setlist")
     return new_row["id"] if isinstance(new_row, dict) else new_row[0]
 
 
@@ -625,6 +625,25 @@ def get_shared_setlist(token: str):
             "settings": _settings_from_row(sl),
             "songs": songs,
         }
+    finally:
+        put_conn(conn)
+
+
+def get_setlist_export_rows(setlist_id: str) -> list:
+    """Ordered raw song rows for export (CSV/XLSX). No formatting — that's
+    a presentation concern handled by the caller."""
+    conn = get_conn()
+    try:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute("""
+                SELECT s.name, s.artist, s.duration_raw, s.duration_sec,
+                       s.tuning, s.our_tuning, ss.plays
+                FROM setlist_songs ss
+                JOIN songs s ON s.id = ss.song_id
+                WHERE ss.setlist_id = %s
+                ORDER BY ss.position
+            """, (setlist_id,))
+            return cur.fetchall()
     finally:
         put_conn(conn)
 

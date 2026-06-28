@@ -2330,6 +2330,13 @@
           <option value="duration">Duration ↑</option>
         </select>
         <button class="toolbar-btn" id="timing-settings-btn" onclick="openTimingSettingsModal()" title="Timing settings" aria-label="Timing settings">⏱</button>
+        <div style="position:relative;">
+          <button class="toolbar-btn" id="setlist-export-btn" onclick="toggleExportMenu(event)" title="Export set list" aria-label="Export set list">⬇</button>
+          <div id="export-menu" class="hdr-menu" style="display:none; left:0;">
+            <button class="app-menu-item" onclick="downloadSetlistExport('csv'); closeAllMenus();">📄 Download CSV</button>
+            <button class="app-menu-item" onclick="downloadSetlistExport('xlsx'); closeAllMenus();">📊 Download XLSX</button>
+          </div>
+        </div>
       </div>
       <span class="spacer"></span>
       <span class="count" id="setlist-count">0 songs</span>
@@ -2764,6 +2771,27 @@ async function shareSetlist() {
   } catch (err) {
     console.error('Share link failed:', err);
     showToast('Could not get share link');
+  }
+}
+
+async function downloadSetlistExport(format) {
+  const qs = new URLSearchParams({ format });
+  if (_currentSetlistId) qs.set('setlist_id', _currentSetlistId);
+  try {
+    const res = await apiFetch('/api/setlist/export?' + qs.toString());
+    if (!res.ok) { showToast('Export failed'); return; }
+    const blob = await res.blob();
+    const cd = res.headers.get('Content-Disposition') || '';
+    const match = cd.match(/filename="([^"]+)"/);
+    const filename = match ? match[1] : `setlist.${format}`;
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = filename;
+    document.body.appendChild(a); a.click(); a.remove();
+    URL.revokeObjectURL(url);
+  } catch (err) {
+    console.error('Export failed:', err);
+    showToast('Export failed');
   }
 }
 
@@ -4628,11 +4656,20 @@ function toggleUserMenu(e) {
   closeAllMenus();
   user.style.display = open ? 'none' : 'block';
 }
+function toggleExportMenu(e) {
+  if (e) e.stopPropagation();
+  const menu = document.getElementById('export-menu');
+  const open = menu.style.display === 'block';
+  closeAllMenus();
+  menu.style.display = open ? 'none' : 'block';
+}
 function closeAllMenus() {
   const band = document.getElementById('band-menu');
   const user = document.getElementById('user-menu');
+  const exportMenu = document.getElementById('export-menu');
   if (band) band.style.display = 'none';
   if (user) user.style.display = 'none';
+  if (exportMenu) exportMenu.style.display = 'none';
 }
 // Backwards-compat alias (some call sites use the old name)
 function closeAppMenu() { closeAllMenus(); }
@@ -4715,7 +4752,7 @@ function avatarColorFor(seed) {
 // Close menus on outside-click or Escape
 document.addEventListener('click', (e) => {
   if (!e.target.closest('.status-popover, .status-chip-btn')) closeStatusPopover();
-  if (e.target.closest('#band-menu, #band-menu-btn, #user-menu, #user-avatar-btn')) return;
+  if (e.target.closest('#band-menu, #band-menu-btn, #user-menu, #user-avatar-btn, #export-menu, #setlist-export-btn')) return;
   closeAllMenus();
 });
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape') { closeAllMenus(); closeStatusPopover(); } });

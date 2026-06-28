@@ -1,7 +1,9 @@
 from dotenv import load_dotenv
 load_dotenv()
 
+import csv
 import datetime
+import io
 import json
 import os
 import sys
@@ -10,7 +12,8 @@ import urllib.parse
 import urllib.error
 import base64
 import time
-from flask import Flask, jsonify, render_template, request, g
+from flask import Flask, jsonify, render_template, request, g, Response
+from openpyxl import Workbook
 
 from auth import require_auth
 import db
@@ -366,6 +369,64 @@ def api_get_setlist_share():
     if err:
         return err
     return jsonify({"token": db.get_setlist_share_token(sid)})
+
+
+EXPORT_COLUMNS = ["Position", "Song", "Artist", "Duration", "Tuning", "Plays"]
+
+
+def _format_duration_for_export(duration_raw, duration_sec):
+    if duration_raw:
+        return duration_raw
+    if duration_sec:
+        return f"{duration_sec // 60}:{duration_sec % 60:02d}"
+    return ""
+
+
+def _export_rows(rows):
+    return [[i, r["name"], r["artist"],
+             _format_duration_for_export(r["duration_raw"], r["duration_sec"]),
+             r["our_tuning"] or r["tuning"] or "", r["plays"]]
+            for i, r in enumerate(rows, start=1)]
+
+
+@app.route("/api/setlist/export", methods=["GET"])
+@require_auth
+def api_export_setlist():
+    """Download the resolved setlist as CSV or XLSX. ?format=csv|xlsx (default csv),
+    optional ?setlist_id= (defaults to the caller's default setlist)."""
+    fmt = request.args.get("format", "csv").lower()
+    if fmt not in ("csv", "xlsx"):
+        return jsonify({"error": "format must be csv or xlsx"}), 400
+    band = db.get_user_band(g.user_id)
+    sid, err = _resolve_setlist(band, g.user_id, request.args.get("setlist_id"))
+    if err:
+        return err
+    rows = _export_rows(db.get_setlist_export_rows(sid))
+    filename = f"setlist-{sid[:8]}.{fmt}"
+
+    if fmt == "csv":
+        buf = io.StringIO()
+        w = csv.writer(buf)
+        w.writerow(EXPORT_COLUMNS)
+        w.writerows(rows)
+        return Response(
+            buf.getvalue(), mimetype="text/csv",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Set List"
+    ws.append(EXPORT_COLUMNS)
+    for row in rows:
+        ws.append(row)
+    bio = io.BytesIO()
+    wb.save(bio)
+    return Response(
+        bio.getvalue(),
+        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @app.route("/api/setlists/<setlist_id>/duplicate", methods=["POST"])
