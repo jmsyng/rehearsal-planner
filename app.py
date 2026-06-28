@@ -371,7 +371,7 @@ def api_get_setlist_share():
     return jsonify({"token": db.get_setlist_share_token(sid)})
 
 
-EXPORT_COLUMNS = ["Position", "Song", "Artist", "Duration", "Tuning", "Key", "Plays"]
+EXPORT_COLUMNS = ["Position", "Song", "Artist", "Duration", "Tuning", "Key", "Camelot", "Plays"]
 
 
 def _format_duration_for_export(duration_raw, duration_sec):
@@ -382,11 +382,29 @@ def _format_duration_for_export(duration_raw, duration_sec):
     return ""
 
 
-def _export_rows(rows):
-    return [[i, r["name"], r["artist"],
-             _format_duration_for_export(r["duration_raw"], r["duration_sec"]),
-             r["our_tuning"] or r["tuning"] or "", r["key_standard"] or "", r["plays"]]
-            for i, r in enumerate(rows, start=1)]
+def _effective_key(row, offsets):
+    """The recorded key transposed to the band's actual tuning — same value
+    shown as the primary Key badge in the app. Falls back to the recorded
+    key unchanged if either tuning is unset or unrecognized."""
+    recorded_key = row["key_standard"]
+    if not recorded_key:
+        return None
+    rec_tuning, our_tuning = row["recorded_tuning"], row["our_tuning"]
+    if not rec_tuning or not our_tuning or rec_tuning == our_tuning:
+        return recorded_key
+    delta = offsets.get(our_tuning, 0) - offsets.get(rec_tuning, 0)
+    return db.transpose_key(recorded_key, delta)
+
+
+def _export_rows(rows, offsets):
+    out = []
+    for i, r in enumerate(rows, start=1):
+        key = _effective_key(r, offsets)
+        out.append([i, r["name"], r["artist"],
+                    _format_duration_for_export(r["duration_raw"], r["duration_sec"]),
+                    r["our_tuning"] or r["tuning"] or "", key or "",
+                    db.CAMELOT_MAP.get(key, ""), r["plays"]])
+    return out
 
 
 @app.route("/api/setlist/export", methods=["GET"])
@@ -401,7 +419,8 @@ def api_export_setlist():
     sid, err = _resolve_setlist(band, g.user_id, request.args.get("setlist_id"))
     if err:
         return err
-    rows = _export_rows(db.get_setlist_export_rows(sid))
+    offsets = db.get_tuning_offsets(g.user_id)
+    rows = _export_rows(db.get_setlist_export_rows(sid), offsets)
     filename = f"setlist-{sid[:8]}.{fmt}"
 
     if fmt == "csv":

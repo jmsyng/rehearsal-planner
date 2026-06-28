@@ -694,7 +694,7 @@ def get_setlist_export_rows(setlist_id: str) -> list:
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
             cur.execute("""
                 SELECT s.name, s.artist, s.duration_raw, s.duration_sec,
-                       s.tuning, s.our_tuning, s.key_standard, ss.plays
+                       s.tuning, s.recorded_tuning, s.our_tuning, s.key_standard, ss.plays
                 FROM setlist_songs ss
                 JOIN songs s ON s.id = ss.song_id
                 WHERE ss.setlist_id = %s
